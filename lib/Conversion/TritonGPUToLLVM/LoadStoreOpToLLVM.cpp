@@ -1099,8 +1099,9 @@ struct AtomicRMWOpConversion
 
     auto valueTy = op.getResult().getType();
     auto tensorTy = valueTy.dyn_cast<RankedTensorType>();
+    auto elementTy = tensorTy.getElementType();
     Type valueElemTy =
-        tensorTy ? getTypeConverter()->convertType(tensorTy.getElementType())
+        tensorTy ? getTypeConverter()->convertType(elementTy)
                  : valueTy;
     const size_t valueElemNBits = valueElemTy.getIntOrFloatBitWidth();
     auto elemsPerThread = getTotalElemsPerThread(val.getType());
@@ -1110,6 +1111,7 @@ struct AtomicRMWOpConversion
     // tensor
     if (tensorTy) {
       auto valTy = val.getType().cast<RankedTensorType>();
+      // TODO (BF16):
       vec = std::min<unsigned>(vec, valTy.getElementType().isF16() ? 2 : 1);
       // mask
       numElems = tensorTy.getNumElements();
@@ -1157,7 +1159,7 @@ struct AtomicRMWOpConversion
       case RMWOp::FADD:
         rmwOp = "add";
         rmwOp += (valueElemNBits == 16 ? ".noftz" : "");
-        sTy = "f" + sBits;
+        sTy = (elementTy.isBF16() ? "bf" : "f") + sBits;
         sTy += (vec == 2 && valueElemNBits == 16) ? "x2" : "";
         break;
       case RMWOp::MAX:
