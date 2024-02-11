@@ -182,6 +182,9 @@ if(TRITON_BUILD_PYTHON_MODULE)
     LLVMPasses
     LLVMX86CodeGen
     LLVMX86AsmParser
+    LLVMAArch64CodeGen
+    LLVMAArch64AsmParser
+
     LLVMNVPTXCodeGen
     # LLVMNVPTXAsmPrinter
     LLVMAMDGPUCodeGen
