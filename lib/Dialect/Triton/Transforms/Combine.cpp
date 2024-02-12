@@ -134,7 +134,7 @@ public:
     rewriter.replaceOpWithNewOp<LoadOp>(
         op, loadOp.getPtr(), loadOp.getMask(), falseValue,
         loadOp.getBoundaryCheck(), loadOp.getPadding(), loadOp.getCache(),
-        loadOp.getEvict(), loadOp.getIsVolatile());
+        loadOp.getEvict(), loadOp.getIsVolatile(), loadOp.getIsSharedMem());
     return success();
   }
 };
