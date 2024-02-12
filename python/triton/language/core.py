@@ -1100,7 +1100,7 @@ def dot(input, other, acc=None, allow_tf32=True, max_num_imprecise_acc=None, out
 
 @builtin
 def load(pointer, mask=None, other=None, boundary_check=tuple(), padding_option="", cache_modifier="",
-         eviction_policy="", volatile=False, _builder=None):
+         eviction_policy="", volatile=False, shared=False, _builder=None):
     """
     Return a tensor of data whose values are loaded from memory at location defined by `pointer`:
         (1) `pointer` could be a single element pointer, then a scalar will be loaded
@@ -1147,7 +1147,7 @@ def load(pointer, mask=None, other=None, boundary_check=tuple(), padding_option=
     eviction_policy = _constexpr_to_value(eviction_policy)
     volatile = _constexpr_to_value(volatile)
     return semantic.load(pointer, mask, other, boundary_check, padding_option, cache_modifier, eviction_policy,
-                         volatile, _builder)
+                         volatile, shared, _builder)
 
 
 @builtin

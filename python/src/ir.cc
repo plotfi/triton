@@ -1211,9 +1211,10 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self, mlir::Value &ptrs,
               mlir::triton::CacheModifier cacheModifier,
               mlir::triton::EvictionPolicy evictionPolicy,
-              bool isVolatile) -> mlir::Value {
+              bool isVolatile,
+              bool isShared) -> mlir::Value {
              return self.create<mlir::triton::LoadOp>(
-                 ptrs, cacheModifier, evictionPolicy, isVolatile);
+                 ptrs, cacheModifier, evictionPolicy, isVolatile, isShared);
            })
       .def("create_store",
            [](TritonOpBuilder &self, mlir::Value &ptrs, mlir::Value &value,
@@ -1228,10 +1229,11 @@ void init_triton_ir(py::module &&m) {
               std::optional<mlir::triton::PaddingOption> paddingOption,
               mlir::triton::CacheModifier cacheModifier,
               mlir::triton::EvictionPolicy evictionPolicy,
-              bool isVolatile) -> mlir::Value {
+              bool isVolatile,
+              bool isShared) -> mlir::Value {
              return self.create<mlir::triton::LoadOp>(
                  ptr, boundaryCheck, paddingOption, cacheModifier,
-                 evictionPolicy, isVolatile);
+                 evictionPolicy, isVolatile, isShared);
            })
       .def("create_tensor_pointer_store",
            [](TritonOpBuilder &self, mlir::Value &ptr, mlir::Value &val,
@@ -1246,10 +1248,11 @@ void init_triton_ir(py::module &&m) {
               std::optional<mlir::Value> &other,
               mlir::triton::CacheModifier cacheModifier,
               mlir::triton::EvictionPolicy evictionPolicy,
-              bool isVolatile) -> mlir::Value {
+              bool isVolatile,
+              bool isShared) -> mlir::Value {
              return self.create<mlir::triton::LoadOp>(
                  ptrs, mask, other.value_or(mlir::Value()), cacheModifier,
-                 evictionPolicy, isVolatile);
+                 evictionPolicy, isVolatile, isShared);
            })
       .def("create_masked_store",
            [](TritonOpBuilder &self, mlir::Value &ptrs, mlir::Value &val,

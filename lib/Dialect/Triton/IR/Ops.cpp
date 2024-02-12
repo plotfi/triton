@@ -171,34 +171,34 @@ static Type getLoadOpResultType(::mlir::OpBuilder &builder, Type ptrType) {
 
 void LoadOp::build(::mlir::OpBuilder &builder, ::mlir::OperationState &state,
                    ::mlir::Value ptr, ::mlir::triton::CacheModifier cache,
-                   ::mlir::triton::EvictionPolicy evict, bool isVolatile) {
+                   ::mlir::triton::EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   LoadOp::build(builder, state, ptr, /*mask=*/{}, /*other=*/{},
-                /*boundaryCheck=*/{}, /*padding=*/{}, cache, evict, isVolatile);
+                /*boundaryCheck=*/{}, /*padding=*/{}, cache, evict, isVolatile, isSharedMem);
 }
 
 void LoadOp::build(::mlir::OpBuilder &builder, ::mlir::OperationState &state,
                    ::mlir::Value ptr, ArrayRef<int32_t> boundaryCheck,
                    std::optional<::mlir::triton::PaddingOption> padding,
                    ::mlir::triton::CacheModifier cache,
-                   ::mlir::triton::EvictionPolicy evict, bool isVolatile) {
+                   ::mlir::triton::EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   LoadOp::build(builder, state, ptr, /*mask=*/{}, /*other=*/{}, boundaryCheck,
-                padding, cache, evict, isVolatile);
+                padding, cache, evict, isVolatile, isSharedMem);
 }
 
 void LoadOp::build(::mlir::OpBuilder &builder, ::mlir::OperationState &state,
                    ::mlir::Value ptr, ::mlir::Value mask,
                    ::mlir::triton::CacheModifier cache,
-                   ::mlir::triton::EvictionPolicy evict, bool isVolatile) {
+                   ::mlir::triton::EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   LoadOp::build(builder, state, ptr, mask, /*other=*/{}, /*boundaryCheck=*/{},
-                /*padding=*/{}, cache, evict, isVolatile);
+                /*padding=*/{}, cache, evict, isVolatile, isSharedMem);
 }
 
 void LoadOp::build(::mlir::OpBuilder &builder, ::mlir::OperationState &state,
                    ::mlir::Value ptr, ::mlir::Value mask, ::mlir::Value other,
                    ::mlir::triton::CacheModifier cache,
-                   ::mlir::triton::EvictionPolicy evict, bool isVolatile) {
+                   ::mlir::triton::EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   LoadOp::build(builder, state, ptr, mask, other, /*boundaryCheck=*/{},
-                /*padding=*/{}, cache, evict, isVolatile);
+                /*padding=*/{}, cache, evict, isVolatile, isSharedMem);
 }
 
 void LoadOp::build(::mlir::OpBuilder &builder, ::mlir::OperationState &state,
@@ -206,7 +206,7 @@ void LoadOp::build(::mlir::OpBuilder &builder, ::mlir::OperationState &state,
                    std::optional<ArrayRef<int32_t>> boundaryCheck,
                    std::optional<::mlir::triton::PaddingOption> padding,
                    ::mlir::triton::CacheModifier cache,
-                   ::mlir::triton::EvictionPolicy evict, bool isVolatile) {
+                   ::mlir::triton::EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   // Operands
   state.addOperands(ptr);
   if (mask) {
@@ -237,6 +237,9 @@ void LoadOp::build(::mlir::OpBuilder &builder, ::mlir::OperationState &state,
       ::mlir::triton::EvictionPolicyAttr::get(builder.getContext(), evict));
   state.addAttribute(getIsVolatileAttrName(state.name),
                      builder.getBoolAttr(isVolatile));
+
+  state.addAttribute(getIsSharedMemAttrName(state.name),
+                     builder.getBoolAttr(isSharedMem));
 
   // Result type
   Type resultType = getLoadOpResultType(builder, ptr.getType());
@@ -271,7 +274,8 @@ struct CanonicalizeMaskedLoadPattern
       rewriter.replaceOpWithNewOp<triton::LoadOp>(
           loadOp, loadOp.getType(), loadOp.getPtr(), Value(), Value(),
           loadOp.getBoundaryCheckAttr(), loadOp.getPaddingAttr(),
-          loadOp.getCache(), loadOp.getEvict(), loadOp.getIsVolatile());
+          loadOp.getCache(), loadOp.getEvict(), loadOp.getIsVolatile(),
+          loadOp.getIsSharedMem());
     } else {
       // mask = splat(0)
 
