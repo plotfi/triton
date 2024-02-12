@@ -242,7 +242,7 @@ def TT_LoadOp : TT_Op<"load", [
 
     let arguments = (
       ins
-      AnyTypeOf<[TT_PtrLike, TT_TensorPtr]>:$ptr,
+      AnyTypeOf<[TT_PtrLike, TT_TensorPtr, TT_Type]>:$ptr,
       Optional<TT_BoolLike>:$mask,
       Optional<TT_Type>:$other,
 

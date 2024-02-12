@@ -1538,7 +1538,6 @@ def dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_i
 # Non-Atomic Memory Operations
 # -----------------------
 
-
 @builtin
 def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", cache_modifier="", eviction_policy="",
          volatile=False, _builder=None):
