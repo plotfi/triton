@@ -117,7 +117,10 @@ Type getPointeeType(Type type) {
   if (auto tensorTy = dyn_cast<RankedTensorType>(type)) {
     // Tensor of pointers
     auto shape = tensorTy.getShape();
-    auto ptrType = dyn_cast<PointerType>(tensorTy.getElementType());
+    if (!tensorTy.getElementType().isa<PointerType>())
+      return RankedTensorType::get(shape, tensorTy.getElementType(),
+                                   tensorTy.getEncoding());
+    auto ptrType = tensorTy.getElementType().dyn_cast<PointerType>();
     Type pointeeType = ptrType.getPointeeType();
     return RankedTensorType::get(shape, pointeeType, tensorTy.getEncoding());
   } else if (auto ptrType = dyn_cast<PointerType>(type)) {

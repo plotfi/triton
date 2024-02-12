@@ -731,7 +731,7 @@ class tensor:
        it its own section so it looks intentional. :)
     """
 
-    def __init__(self, handle, type: dtype):
+    def __init__(self, handle, type: dtype, shared_ptr_ty: dtype = None):
         """Not called by user code."""
         # IR handle
         self.handle = handle
@@ -745,6 +745,7 @@ class tensor:
         # Following the practice in pytorch, dtype is scalar type
         self.dtype = type.scalar
         self.shape = [constexpr(s) for s in self.shape]
+        self.shared_ptr_ty = shared_ptr_ty
 
     def __str__(self) -> str:
         # ex. "float32[16, 32]"
@@ -1538,10 +1539,25 @@ def dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_i
 # Non-Atomic Memory Operations
 # -----------------------
 
+@builtin
+def prefetch(pointer, mask=None, other=None, boundary_check=tuple(), padding_option="", cache_modifier="",
+         eviction_policy="", volatile=False, _builder=None):
+    mask = _constexpr_to_value(mask)
+    other = _constexpr_to_value(other)
+    if mask is not None:
+        mask = _to_tensor(mask, _builder)
+    if other is not None:
+        other = _to_tensor(other, _builder)
+    padding_option = _constexpr_to_value(padding_option)
+    cache_modifier = _constexpr_to_value(cache_modifier)
+    eviction_policy = _constexpr_to_value(eviction_policy)
+    volatile = _constexpr_to_value(volatile)
+    return semantic.load(pointer, mask, other, boundary_check, padding_option, cache_modifier, eviction_policy,
+                         volatile, is_shared=True, builder=_builder)
 
 @builtin
 def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", cache_modifier="", eviction_policy="",
-         volatile=False, _builder=None):
+         volatile=False, shared=False, _builder=None):
     """
     Return a tensor of data whose values are loaded from memory at location defined by `pointer`:
 
@@ -1595,7 +1611,7 @@ def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", c
     eviction_policy = _constexpr_to_value(eviction_policy)
     volatile = _constexpr_to_value(volatile)
     return semantic.load(pointer, mask, other, boundary_check, padding_option, cache_modifier, eviction_policy,
-                         volatile, _builder)
+                         volatile, shared, _builder)
 
 
 @builtin
