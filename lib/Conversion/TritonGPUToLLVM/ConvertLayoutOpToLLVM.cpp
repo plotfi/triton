@@ -6,6 +6,8 @@
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 
 #include "triton/Conversion/TritonGPUToLLVM/PatternTritonGPUOpToLLVM.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 
 using mlir::isLayoutMmaV1;
 using mlir::LLVM::getMultiDimOffset;
@@ -23,6 +25,66 @@ using ::mlir::triton::gpu::isaDistributedLayout;
 using ::mlir::triton::gpu::SharedEncodingAttr;
 
 namespace {
+
+
+struct LocalGatherOpConversion
+    : public ConvertOpToLLVMPattern<triton::gpu::LocalGatherOp> {
+public:
+  LocalGatherOpConversion(LLVMTypeConverter &typeConverter,
+                        const TargetInfoBase &targetInfo,
+                        PatternBenefit benefit = 1)
+      : ConvertOpToLLVMPattern(typeConverter, benefit), targetInfo(targetInfo) {
+  }
+
+  LogicalResult
+  matchAndRewrite(triton::gpu::LocalGatherOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    MemDescType srcTy = op.getSrc().getType();
+    RankedTensorType dstTy = op.getType();
+    Attribute srcLayout = srcTy.getEncoding();
+    Attribute dstLayout = dstTy.getEncoding();
+    // TODO: do we need to check if src is shared ?
+    if (isa<SharedEncodingAttr>(srcLayout) && isaDistributedLayout(dstLayout)) {
+      return lowerSharedToDistributed(op, adaptor, getTypeConverter(),
+                                      rewriter);
+    }
+    llvm::llvm_unreachable_internal("expectedd LocalGatherOp to have shared encoding");
+    return failure();
+  }
+
+private:
+  LogicalResult
+  lowerSharedToDistributed(triton::gpu::LocalGatherOp op,
+                           triton::gpu::LocalGatherOpAdaptor adaptor,
+                           const LLVMTypeConverter *typeConverter,
+                           ConversionPatternRewriter &rewriter) const {
+    auto loc = op.getLoc();
+    auto srcTy = op.getSrc().getType();
+    auto dstTy = op.getResult().getType();
+    auto dstShape = dstTy.getShape();
+    assert(dstShape.size() <= 2 &&
+           "Unexpected rank of ConvertLayout(shared->blocked)");
+
+    auto smemObj =
+      getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(),
+                                      typeConverter->convertType(
+                                        srcTy.getElementType()), rewriter);
+
+    auto elemTy = typeConverter->convertType(dstTy.getElementType());
+
+    SmallVector<Value> outVals =
+        gatherSharedToDistributed(op.getResult(), op.getSrc(), op.getIndices(),
+                                  smemObj, elemTy, loc, rewriter, targetInfo);
+
+    Value result = packLLElements(loc, typeConverter, outVals, rewriter, dstTy);
+    rewriter.replaceOp(op, result);
+
+    return success();
+  }
+
+private:
+  const TargetInfoBase &targetInfo;
+};
 
 struct LocalLoadOpConversion
     : public ConvertOpToLLVMPattern<triton::gpu::LocalLoadOp> {
@@ -321,4 +383,5 @@ void mlir::triton::populateConvertLayoutOpToLLVMPatterns(
     RewritePatternSet &patterns, PatternBenefit benefit) {
   patterns.add<ConvertLayoutOpConversion>(typeConverter, targetInfo, benefit);
   patterns.add<LocalLoadOpConversion>(typeConverter, targetInfo, benefit);
+  patterns.add<LocalGatherOpConversion>(typeConverter, targetInfo, benefit);
 }

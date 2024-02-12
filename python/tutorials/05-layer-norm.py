@@ -63,9 +63,15 @@ def _layer_norm_fwd_fused(
     # Compute mean
     mean = 0
     _mean = tl.zeros([BLOCK_SIZE], dtype=tl.float32)
+
+    # X_pref = tl.prefetch(X)
+    X_pref = tl.prefetch(X + tl.arange(0, BLOCK_SIZE))
+
+
     for off in range(0, N, BLOCK_SIZE):
         cols = off + tl.arange(0, BLOCK_SIZE)
-        a = tl.load(X + cols, mask=cols < N, other=0.).to(tl.float32)
+        a = tl.load(X_pref + off, mask=cols < N, other=0.).to(tl.float32)
+
         _mean += a
     mean = tl.sum(_mean, axis=0) / N
     # Compute variance
