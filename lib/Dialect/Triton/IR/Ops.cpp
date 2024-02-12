@@ -40,52 +40,57 @@ static Type getLoadOpResultType(OpBuilder &builder, Type ptrType) {
     return ptrType.cast<PointerType>().getPointeeType();
   auto shape = ptrTensorType.getShape();
   Type elementType =
-      ptrTensorType.getElementType().cast<PointerType>().getPointeeType();
+      !ptrTensorType.getElementType().isa<PointerType>()
+          ? ptrTensorType.getElementType()
+          : ptrTensorType.getElementType().cast<PointerType>().getPointeeType();
   return RankedTensorType::get(shape, elementType);
 }
 
 void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
-                   CacheModifier cache, EvictionPolicy evict, bool isVolatile) {
+                   CacheModifier cache, EvictionPolicy evict, bool isVolatile,
+                   bool isSharedMem) {
   LoadOp::build(builder, state, ptr, /*mask=*/{}, /*other=*/{},
                 /*boundaryCheck=*/ArrayRef<int32_t>{}, /*padding=*/std::nullopt,
-                cache, evict, isVolatile);
+                cache, evict, isVolatile, isSharedMem);
 }
 
 void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                    ArrayRef<int32_t> boundaryCheck,
                    std::optional<PaddingOption> padding, CacheModifier cache,
-                   EvictionPolicy evict, bool isVolatile) {
+                   EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   LoadOp::build(builder, state, ptr, /*mask=*/{}, /*other=*/{}, boundaryCheck,
-                padding, cache, evict, isVolatile);
+                padding, cache, evict, isVolatile, isSharedMem);
 }
 
 void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                    Value mask, CacheModifier cache, EvictionPolicy evict,
-                   bool isVolatile) {
+                   bool isVolatile, bool isSharedMem) {
   LoadOp::build(builder, state, ptr, mask, /*other=*/{},
                 /*boundaryCheck=*/ArrayRef<int32_t>{},
-                /*padding=*/std::nullopt, cache, evict, isVolatile);
+                /*padding=*/std::nullopt, cache, evict, isVolatile,
+                isSharedMem);
 }
 
 void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                    Value mask, Value other, CacheModifier cache,
-                   EvictionPolicy evict, bool isVolatile) {
+                   EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   LoadOp::build(builder, state, ptr, mask, other,
                 /*boundaryCheck=*/ArrayRef<int32_t>{},
-                /*padding=*/std::nullopt, cache, evict, isVolatile);
+                /*padding=*/std::nullopt, cache, evict, isVolatile,
+                isSharedMem);
 }
 
 void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                    Value mask, Value other, ArrayRef<int32_t> boundaryCheck,
                    std::optional<PaddingOption> padding, CacheModifier cache,
-                   EvictionPolicy evict, bool isVolatile) {
+                   EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   auto paddingAttr =
       padding.has_value()
           ? PaddingOptionAttr::get(builder.getContext(), padding.value())
           : PaddingOptionAttr();
   LoadOp::build(builder, state, ptr, mask, other,
                 builder.getDenseI32ArrayAttr(boundaryCheck), paddingAttr, cache,
-                evict, isVolatile);
+                evict, isVolatile, isSharedMem);
 }
 
 // load(ptr, splat(1), ...)        -> load(ptr, ...)
@@ -114,7 +119,8 @@ struct CanonicalizeMaskedLoadPattern : public OpRewritePattern<LoadOp> {
       rewriter.replaceOpWithNewOp<LoadOp>(
           loadOp, loadOp.getType(), loadOp.getPtr(), Value(), Value(),
           loadOp.getBoundaryCheckAttr(), loadOp.getPaddingAttr(),
-          loadOp.getCache(), loadOp.getEvict(), loadOp.getIsVolatile());
+          loadOp.getCache(), loadOp.getEvict(), loadOp.getIsVolatile(),
+          loadOp.getIsSharedMem());
     } else {
       // mask = splat(0)
 

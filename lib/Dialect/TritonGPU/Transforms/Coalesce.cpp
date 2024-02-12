@@ -7,6 +7,7 @@
 #include "llvm/Support/Debug.h"
 #include <iterator>
 #include <numeric>
+#include <stack>
 
 #define DEBUG_TYPE "tritongpu-coalesce"
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
@@ -151,6 +152,8 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
   }
 
   void runOnOperation() override {
+    expandLocalLoads();
+
     // Run axis info analysis
     ModuleOp moduleOp = getOperation();
     ModuleAxisInfoAnalysis axisInfoAnalysis(moduleOp);
@@ -187,6 +190,95 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     // 5. Replace all the uses of the original memory op by the new one
     for (auto &kv : layoutMap) {
       coalesceOp(kv.second, kv.first);
+    }
+  }
+
+  void expandLocalLoads() {
+    ModuleOp moduleOp = getOperation();
+
+    // For each i/o operation, we determine what layout
+    // the pointers should have for best memory coalescing
+    std::stack<Operation *> eraser;
+    moduleOp.walk([&](Operation *op) {
+      auto loadOp = dyn_cast<triton::LoadOp>(op);
+      if (!loadOp)
+        return;
+
+      auto ptr = op->getOperand(0);
+      auto loadOpPtr = dyn_cast<triton::LoadOp>(ptr.getDefiningOp());
+      if (!loadOpPtr || !loadOpPtr.getIsSharedMem())
+        return;
+
+      OpBuilder builder(op);
+
+      // Convert the tensor operand of the tt.load(isShared = true) into a
+      // MemDescType
+      auto tensorType =
+          loadOpPtr->getResult(0).getType().cast<RankedTensorType>();
+      auto elementType = tensorType.getElementType();
+
+      auto srcBlocked =
+          tensorType.getEncoding().dyn_cast<triton::gpu::BlockedEncodingAttr>();
+
+      auto oldOrder = mlir::triton::gpu::getOrder(srcBlocked);
+      std::vector<unsigned> newOrder = {1, oldOrder[0]};
+
+      auto oldShape = tensorType.getShape();
+      std::vector<int64_t> newShape = {1, oldShape[0]};
+
+      int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(moduleOp);
+      int numCTAs = triton::gpu::TritonGPUDialect::getNumCTAs(moduleOp);
+      int threadsPerWarp =
+          triton::gpu::TritonGPUDialect::getThreadsPerWarp(moduleOp);
+
+      SmallVector<unsigned, 4> sizePerThread(tensorType.getRank() + 1, 1);
+      auto newBlockedLayout = triton::gpu::BlockedEncodingAttr::get(
+          tensorType.getContext(), newShape, sizePerThread, newOrder, numWarps,
+          threadsPerWarp, numCTAs);
+
+      auto reshapeOp = builder.create<triton::ReshapeOp>(
+          loadOp.getLoc(),
+          RankedTensorType::get(newShape, elementType, newBlockedLayout),
+          loadOpPtr.getResult(), false /* allowReorder */);
+
+      auto CTALayout = newBlockedLayout.getCTALayout();
+      auto newLayout = mlir::triton::gpu::SharedEncodingAttr::get(
+          tensorType.getContext(), newShape, newOrder, CTALayout, elementType);
+
+      auto memDescType =
+          triton::MemDescType::get(newShape, elementType, newLayout);
+      loadOpPtr.setIsSharedMem(false);
+
+      // Replace the original tt.load(isShared = true) with the
+      // triton_gpu.local_alloc(tt.load(isShared = false)) instruction sequence
+      auto localAllocOp = builder.create<triton::gpu::LocalAllocOp>(
+          loadOpPtr.getLoc(), memDescType, reshapeOp.getResult());
+
+      auto loadOpType = cast<RankedTensorType>(loadOp.getType());
+      auto shape = memDescType.getShape();
+      auto enc = newBlockedLayout;
+
+      // Replace the tt.load from SMEM with a triton_gpu.local_load
+      auto localLoadOp = builder.create<triton::gpu::LocalLoadOp>(
+          loadOp.getLoc(),
+          RankedTensorType::get(shape, memDescType.getElementType(), enc),
+          localAllocOp);
+
+      auto reshapeOp2 = builder.create<triton::ReshapeOp>(
+          loadOp.getLoc(),
+          RankedTensorType::get(oldShape, elementType, srcBlocked),
+          localLoadOp.getResult(), false /* allowReorder */);
+
+      op->getResult(0).replaceAllUsesWith(reshapeOp2);
+
+      // Erase the original operation
+      eraser.push(op);
+    });
+
+    while (!eraser.empty()) {
+      auto op = eraser.top();
+      eraser.pop();
+      op->erase();
     }
   }
 };
