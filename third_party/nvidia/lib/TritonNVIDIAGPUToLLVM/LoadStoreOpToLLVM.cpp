@@ -142,6 +142,12 @@ struct LoadOpConversion : public ConvertOpToLLVMPattern<triton::LoadOp>,
     auto loc = op->getLoc();
     auto typeConverter = getTypeConverter();
 
+
+    if (op.getIsSharedMem()) {
+      llvm::errs() << "DO LOAD TO SHARED MEMORY\n";
+      op->dump();
+    }
+
     // original values
     Value ptr = op.getPtr();
     Value mask = op.getMask();

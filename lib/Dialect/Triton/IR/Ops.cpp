@@ -169,38 +169,38 @@ static Type getLoadOpResultType(OpBuilder &builder, Type ptrType) {
 }
 
 void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
-                   CacheModifier cache, EvictionPolicy evict, bool isVolatile) {
+                   CacheModifier cache, EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   LoadOp::build(builder, state, ptr, /*mask=*/{}, /*other=*/{},
-                /*boundaryCheck=*/{}, /*padding=*/{}, cache, evict, isVolatile);
+                /*boundaryCheck=*/{}, /*padding=*/{}, cache, evict, isVolatile, isSharedMem);
 }
 
 void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                    ArrayRef<int32_t> boundaryCheck,
                    std::optional<PaddingOption> padding, CacheModifier cache,
-                   EvictionPolicy evict, bool isVolatile) {
+                   EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   LoadOp::build(builder, state, ptr, /*mask=*/{}, /*other=*/{}, boundaryCheck,
-                padding, cache, evict, isVolatile);
+                padding, cache, evict, isVolatile, isSharedMem);
 }
 
 void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                    Value mask, CacheModifier cache, EvictionPolicy evict,
-                   bool isVolatile) {
+                   bool isVolatile, bool isSharedMem) {
   LoadOp::build(builder, state, ptr, mask, /*other=*/{}, /*boundaryCheck=*/{},
-                /*padding=*/{}, cache, evict, isVolatile);
+                /*padding=*/{}, cache, evict, isVolatile, isSharedMem);
 }
 
 void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                    Value mask, Value other, CacheModifier cache,
-                   EvictionPolicy evict, bool isVolatile) {
+                   EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   LoadOp::build(builder, state, ptr, mask, other, /*boundaryCheck=*/{},
-                /*padding=*/{}, cache, evict, isVolatile);
+                /*padding=*/{}, cache, evict, isVolatile, isSharedMem);
 }
 
 void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                    Value mask, Value other,
                    std::optional<ArrayRef<int32_t>> boundaryCheck,
                    std::optional<PaddingOption> padding, CacheModifier cache,
-                   EvictionPolicy evict, bool isVolatile) {
+                   EvictionPolicy evict, bool isVolatile, bool isSharedMem) {
   // Operands
   state.addOperands(ptr);
   if (mask) {
@@ -229,6 +229,9 @@ void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                      EvictionPolicyAttr::get(builder.getContext(), evict));
   state.addAttribute(getIsVolatileAttrName(state.name),
                      builder.getBoolAttr(isVolatile));
+
+  state.addAttribute(getIsSharedMemAttrName(state.name),
+                     builder.getBoolAttr(isSharedMem));
 
   // Result type
   Type resultType = getLoadOpResultType(builder, ptr.getType());
@@ -261,7 +264,8 @@ struct CanonicalizeMaskedLoadPattern : public OpRewritePattern<LoadOp> {
       rewriter.replaceOpWithNewOp<LoadOp>(
           loadOp, loadOp.getType(), loadOp.getPtr(), Value(), Value(),
           loadOp.getBoundaryCheckAttr(), loadOp.getPaddingAttr(),
-          loadOp.getCache(), loadOp.getEvict(), loadOp.getIsVolatile());
+          loadOp.getCache(), loadOp.getEvict(), loadOp.getIsVolatile(),
+          loadOp.getIsSharedMem());
     } else {
       // mask = splat(0)
 

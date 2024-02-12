@@ -904,7 +904,8 @@ private:
           // TODO(Chenggang): confirm `boundaryCheck` and `padding`
           /*boundaryCheck=*/nullptr, /*padding=*/nullptr,
           insertSliceAsyncOp.getCache(), insertSliceAsyncOp.getEvict(),
-          insertSliceAsyncOp.getIsVolatile());
+          insertSliceAsyncOp.getIsVolatile(),
+          false /* IsSharedMem */);
       addWSNamedAttrs(loadOp, insertSliceAsyncOp->getAttrs());
 
       // insert_slice
