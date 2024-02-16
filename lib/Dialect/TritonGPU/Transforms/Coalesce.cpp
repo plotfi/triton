@@ -177,6 +177,12 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     // the pointers should have for best memory coalescing
     llvm::MapVector<Operation *, Attribute> layoutMap;
     moduleOp.walk([&](Operation *curr) {
+      // Skip coalessing shared memory loads for now.
+      // They are low latency enough as is, and they are not supported.
+      if (auto loadOp = dyn_cast<LoadOp>(curr);
+          loadOp && loadOp.getIsSharedMem())
+          return;
+
       Value ptr = getMemAccessPtr(curr);
       if (!ptr)
         return;

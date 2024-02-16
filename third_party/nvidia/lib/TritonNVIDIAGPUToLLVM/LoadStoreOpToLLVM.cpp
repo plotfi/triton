@@ -142,12 +142,6 @@ struct LoadOpConversion : public ConvertOpToLLVMPattern<triton::LoadOp>,
     auto loc = op->getLoc();
     auto typeConverter = getTypeConverter();
 
-
-    if (op.getIsSharedMem()) {
-      llvm::errs() << "DO LOAD TO SHARED MEMORY\n";
-      op->dump();
-    }
-
     // original values
     Value ptr = op.getPtr();
     Value mask = op.getMask();
@@ -197,8 +191,19 @@ struct LoadOpConversion : public ConvertOpToLLVMPattern<triton::LoadOp>,
       otherElems = unpackLLElements(loc, llOther, rewriter);
     }
 
+    // This is a hacky way to check whether the ptr type to a LoadOp
+    // comes from a LoadOp(IsShared=true) that was stored to shared memory.
+    // It is used to set the .shared sub-opcode for the ptx load instruction
+    bool isPtrAddrspace3 = false;
+    if (auto ptrType = dyn_cast<PointerType>(ptr.getType());
+        ptrType && ptrType.getAddressSpace() && !op.getIsSharedMem())
+        isPtrAddrspace3 = true;
+
     // vectorized iteration through all the pointer/mask/other elements
     const int valueElemNBits =
+        // Don't call getIntOrFloatBitWidth on load to shared memory,
+        // the result type will be a ptr<3>
+        op.getIsSharedMem() ? 64 :
         std::max(8u, valueElemTy.getIntOrFloatBitWidth());
     const int numVecs = numElems / vec;
 
@@ -241,8 +246,8 @@ struct LoadOpConversion : public ConvertOpToLLVMPattern<triton::LoadOp>,
 
       // Define the instruction opcode
       auto &ld = ptxBuilder.create<>("ld")
-                     ->o("volatile", op.getIsVolatile())
-                     .global()
+                     ->o("volatile", op.getIsVolatile());
+      ld = (isPtrAddrspace3 ? ld.shared() : ld.global())
                      .o("ca", op.getCache() == triton::CacheModifier::CA)
                      .o("cg", op.getCache() == triton::CacheModifier::CG)
                      .o("L1::evict_first",
@@ -306,6 +311,15 @@ struct LoadOpConversion : public ConvertOpToLLVMPattern<triton::LoadOp>,
       // LLVM::AsmDialectAttr::get(rewriter.getContext(),
       //                                                 LLVM::AsmDialect::AD_ATT);
       Value ret = ptxBuilder.launch(rewriter, loc, retTy);
+
+      // If this is a shared memory load, load then store to shared memory
+      // and skip the rest of the extract element operations of this loop.
+      if (op.getIsSharedMem()) {
+        Value baseSharedMemPtr = LLVM::getSharedMemoryBase(loc, rewriter, op.getOperation());
+        store(ret, baseSharedMemPtr);
+        loadedVals.push_back(baseSharedMemPtr);
+        break;
+      }
 
       // Extract and store return values
       SmallVector<Value> rets;

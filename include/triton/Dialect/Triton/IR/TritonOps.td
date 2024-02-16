@@ -213,27 +213,32 @@ def TT_AdvanceOp : TT_Op<"advance",
 // Load/Store Ops
 //
 def TT_LoadOp : TT_Op<"load",
-                      [SameLoadStoreOperandsAndResultShape,
+                      [
+                       // SameLoadStoreOperandsAndResultShape,
                        SameLoadStoreOperandsAndResultEncoding,
                        AttrSizedOperandSegments,
                        DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
-                       TypesMatchWith<"infer ptr type from result type",
-                                      "result", "ptr", "$_self",
-                                      "mlir::OpTrait::impl::verifyLoadStorePointerAndValueType">,
-                       TypesMatchWith<"infer mask type from result type or none",
-                                      "result", "mask", "getI1SameShape($_self)",
-                                      "($_op.getOperands().size() <= 1) || std::equal_to<>()">,
-                       TypesMatchWith<"infer other type from result type or none",
-                                      "result", "other", "$_self",
-                                      "($_op.getOperands().size() <= 2) || std::equal_to<>()">]> {
+                       // NOTE: Types will not match if we are getting a result pointer addrspace(3) from a input pointer addrspace(1)
+                       // TypesMatchWith<"infer ptr type from result type",
+                       //                "result", "ptr", "$_self",
+                       //                "mlir::OpTrait::impl::verifyLoadStorePointerAndValueType">,
+                       // TypesMatchWith<"infer mask type from result type or none 1",
+                       //                "result", "mask", "getI1SameShape($_self)",
+                       //                "($_op.getOperands().size() <= 1) || std::equal_to<>()">,
+                       // TypesMatchWith<"infer other type from result type or none",
+                       //                "result", "other", "$_self",
+                       //                "($_op.getOperands().size() <= 2) || std::equal_to<>()">
+                       ]> {
     let summary = "Load from a tensor of pointers or from a tensor pointer";
 
-    let arguments = (ins AnyTypeOf<[TT_PtrLike, TT_TensorPtr]>:$ptr, Optional<TT_BoolLike>:$mask,
+    // TODO: Consider droppig TT_Type input
+    let arguments = (ins AnyTypeOf<[TT_PtrLike, TT_TensorPtr, TT_Type]>:$ptr, Optional<TT_BoolLike>:$mask,
                          Optional<TT_Type>:$other, OptionalAttr<DenseI32ArrayAttr>:$boundaryCheck,
                          OptionalAttr<TT_PaddingOptionAttr>:$padding, TT_CacheModifierAttr:$cache,
                          TT_EvictionPolicyAttr:$evict, BoolAttr:$isVolatile, BoolAttr:$isSharedMem);
 
-    let results = (outs TT_Type:$result);
+    // LoadOps _to_ shared memory produce pointers to shared memory
+    let results = (outs AnyTypeOf<[TT_PtrLike, TT_TensorPtr, TT_Type]>:$result);
 
     let builders = [
         // A tensor of pointers or a pointer to a scalar

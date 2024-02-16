@@ -158,10 +158,30 @@ namespace mlir {
 namespace triton {
 
 //-- LoadOp --
-static Type getLoadOpResultType(OpBuilder &builder, Type ptrType) {
+static Type getLoadOpResultType(OpBuilder &builder, Value ptr, bool isSharedMem) {
+  Type ptrType = ptr.getType();
+
+  // A hacky way to set the correct result type for a load _from_ shared memory.
+  // this is the secondary load in a sequence:
+  // a = tl.load(shared=True)
+  // b = tl.load(a) <- this is the secondary load
+  if (auto loadOp = dyn_cast<LoadOp>(ptr.getDefiningOp());
+      loadOp && loadOp.getIsSharedMem() && !isSharedMem) {
+    return getLoadOpResultType(builder, loadOp.getPtr(), false);
+  }
+
   auto ptrTensorType = ptrType.dyn_cast<RankedTensorType>();
   if (!ptrTensorType)
     return ptrType.cast<PointerType>().getPointeeType();
+
+  // If the load is _to_ shared memory,
+  // then the result type should be a pointer to address space 3.
+  // Both NVPTX and AMDGPU use address space 3 for shared memory.
+  // Use the inner type of the tensor.
+  if (auto innerPtr = dyn_cast<PointerType>(ptrTensorType.getElementType());
+      innerPtr && isSharedMem) {
+    return PointerType::get(innerPtr.getPointeeType(), 3);
+  }
   auto shape = ptrTensorType.getShape();
   Type elementType =
       ptrTensorType.getElementType().cast<PointerType>().getPointeeType();
@@ -234,7 +254,7 @@ void LoadOp::build(OpBuilder &builder, OperationState &state, Value ptr,
                      builder.getBoolAttr(isSharedMem));
 
   // Result type
-  Type resultType = getLoadOpResultType(builder, ptr.getType());
+  Type resultType = getLoadOpResultType(builder, ptr, isSharedMem);
   state.addTypes({resultType});
 }
 
