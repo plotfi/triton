@@ -230,6 +230,12 @@ private:
     // XXX(Keren): Why this hard-coded alignment?
     size_t kAlignment = 8;
     for (Value result : op->getResults()) {
+      if (auto load = dyn_cast<triton::LoadOp>(op)) {
+        if (load.getIsSharedMem()) {
+          allocation->addBuffer<BufferT::BufferKind::Explicit>(result, 8,
+                                                           kAlignment);
+        }
+      }
       if (triton::gpu::hasSharedEncoding(result)) {
         // Bytes could be a different value once we support padding or other
         // allocation policies.

@@ -5,6 +5,8 @@
 #include "Utility.h"
 
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <numeric>
 
@@ -137,12 +139,6 @@ struct LoadOpConversion : public ConvertOpToLLVMPattern<triton::LoadOp>,
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = op->getLoc();
     auto typeConverter = getTypeConverter();
-
-
-    if (op.getIsSharedMem()) {
-      llvm::errs() << "DO LOAD TO SHARED MEMORY\n";
-      op->dump();
-    }
 
     // original values
     Value ptr = op.getPtr();
@@ -303,6 +299,15 @@ struct LoadOpConversion : public ConvertOpToLLVMPattern<triton::LoadOp>,
       // LLVM::AsmDialectAttr::get(rewriter.getContext(),
       //                                                 LLVM::AsmDialect::AD_ATT);
       Value ret = ptxBuilder.launch(rewriter, loc, retTy);
+
+      if (op.getIsSharedMem()) {
+        Value baseSharedMemPtr =
+          LLVM::getSharedMemoryBase(loc, rewriter, op.getOperation());
+        Value smemAddr = baseSharedMemPtr;
+        smemAddr = bitcast(smemAddr, ptr_ty(rewriter.getContext(), 3));
+        store(ret, smemAddr);
+        ret = ptrtoint(valueElemTy, smemAddr);
+      }
 
       // Extract and store return values
       SmallVector<Value> rets;
