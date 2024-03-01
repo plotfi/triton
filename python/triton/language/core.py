@@ -644,7 +644,7 @@ class tensor:
        it its own section so it looks intentional. :)
     """
 
-    def __init__(self, handle, type: dtype):
+    def __init__(self, handle, type: dtype, shared_ptr_ty: dtype = None):
         """Not called by user code."""
         # IR handle
         self.handle = handle
@@ -658,6 +658,7 @@ class tensor:
         # Following the practice in pytorch, dtype is scalar type
         self.dtype = type.scalar
         self.shape = [constexpr(s) for s in self.shape]
+        self.shared_ptr_ty = shared_ptr_ty
 
     def __str__(self) -> str:
         # ex. "float32[16, 32]"

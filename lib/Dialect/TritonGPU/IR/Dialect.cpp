@@ -2671,18 +2671,6 @@ struct CanonicalizeConvertFromConvert
     if (!arg)
       return failure();
 
-    // TODO: Review if this converter change is necesary
-    if (auto loadOp = dyn_cast<LoadOp>(arg);
-      loadOp && loadOp.getIsSharedMem()) {
-      rewriter.replaceOpWithNewOp<LoadOp>(
-        op, op->getResult(0).getType(),
-        loadOp.getPtr(), Value(), Value(),
-        loadOp.getBoundaryCheckAttr(), loadOp.getPaddingAttr(),
-        loadOp.getCache(), loadOp.getEvict(), loadOp.getIsVolatile(),
-        loadOp.getIsSharedMem());
-      return success();
-    }
-
     // cvt(reshape) -> reshape
     if (auto reshape = dyn_cast<ReshapeOp>(arg)) {
       if (!reshape.getAllowReorder() ||

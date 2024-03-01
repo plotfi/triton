@@ -231,14 +231,13 @@ def TT_LoadOp : TT_Op<"load",
                        ]> {
     let summary = "Load from a tensor of pointers or from a tensor pointer";
 
-    // TODO: Consider droppig TT_Type input
-    let arguments = (ins AnyTypeOf<[TT_PtrLike, TT_TensorPtr, TT_Type]>:$ptr, Optional<TT_BoolLike>:$mask,
+    let arguments = (ins AnyTypeOf<[TT_PtrLike, TT_TensorPtr]>:$ptr, Optional<TT_BoolLike>:$mask,
                          Optional<TT_Type>:$other, OptionalAttr<DenseI32ArrayAttr>:$boundaryCheck,
                          OptionalAttr<TT_PaddingOptionAttr>:$padding, TT_CacheModifierAttr:$cache,
                          TT_EvictionPolicyAttr:$evict, BoolAttr:$isVolatile, BoolAttr:$isSharedMem);
 
     // LoadOps _to_ shared memory produce pointers to shared memory
-    let results = (outs AnyTypeOf<[TT_PtrLike, TT_TensorPtr, TT_Type]>:$result);
+    let results = (outs AnyTypeOf<[TT_PtrLike, TT_Type]>:$result);
 
     let builders = [
         // A tensor of pointers or a pointer to a scalar

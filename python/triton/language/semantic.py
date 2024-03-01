@@ -845,10 +845,6 @@ def cast(input: tl.tensor, dst_ty: tl.dtype, builder: ir.builder, fp_downcast_ro
     if src_sca_ty.is_ptr() and dst_sca_ty.is_ptr():
         return tl.tensor(builder.create_bitcast(input.handle, dst_ty.to_ir(builder)), dst_ty)
 
-    # for now, return a bit cast so we don't breat on a load from ptr<1> to ptr<3>
-    # return tl.tensor(builder.create_int_to_ptr(input.handle, dst_ty.to_ir(builder)), dst_ty)
-    return tl.tensor(builder.create_bitcast(input.handle, dst_ty.to_ir(builder)), dst_ty)
-
     assert False, f'cannot cast {input} to {dst_ty}'
 
 
@@ -975,12 +971,16 @@ def _load_block_pointer(ptr, mask, other, boundary_check, padding, cache, evicti
 
 
 def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile, is_shared, builder):
+
+    # to reduce confusion (TODO: adopt this naming scheme everywhere)
+    is_load_to_smem: bool = is_shared
+    is_ptr_to_smem: bool = ptr.shared_ptr_ty != None
+    assert not (is_load_to_smem and is_ptr_to_smem), "Expected either a write to shared memory or a read from shared memory or neither"
+
     # TODO: determine if we still need this indirectRegLoad check
-    indirectRegLoad = False
     # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
-    if not ptr.type.scalar.is_ptr():
-        indirectRegLoad = True
-        # raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
+    if not ptr.type.scalar.is_ptr() and not is_ptr_to_smem:
+        raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
 
     # Check `mask`, `other`, `boundary_check`, and `padding` arguments
     if not mask and other:
@@ -1006,7 +1006,7 @@ def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_
 
     # Get `pointer_type<elt_ty>` and `elt_ty`
     ptr_ty = ptr.type.scalar
-    elt_ty = ptr_ty.element_ty if indirectRegLoad == False else ptr.type
+    elt_ty = ptr.shared_ptr_ty if is_ptr_to_smem else ptr_ty.element_ty
 
     # Treat `pointer_type<tl.int1>` as `pointer_type<tl.int8>`
     if elt_ty == tl.int1:
@@ -1026,13 +1026,16 @@ def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_
         # Load by de-referencing the pointer of scalar
         dst_ty = elt_ty
 
+    shared_ptr_ty = elt_ty if is_load_to_smem else None
+
     # Build IR
     if not mask:
-        return tl.tensor(builder.create_load(ptr.handle, cache, eviction, is_volatile, is_shared), dst_ty)
+        return tl.tensor(builder.create_load(ptr.handle, cache, eviction, is_volatile, is_load_to_smem), dst_ty,
+                                             shared_ptr_ty)
     else:
         return tl.tensor(
             builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None, cache, eviction,
-                                       is_volatile, is_shared), dst_ty)
+                                       is_volatile, is_load_to_smem), dst_ty, shared_ptr_ty)
 
 
 def load(ptr: tl.tensor, mask: Optional[tl.tensor], other: Optional[tl.tensor], boundary_check, padding_option: str,
