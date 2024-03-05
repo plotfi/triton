@@ -196,14 +196,21 @@ struct LoadOpConversion : public ConvertOpToLLVMPattern<triton::LoadOp>,
     // It is used to set the .shared sub-opcode for the ptx load instruction
     bool isPtrAddrspace3 = false;
     if (auto ptrType = dyn_cast<PointerType>(ptr.getType());
-        ptrType && ptrType.getAddressSpace() && !op.getIsSharedMem())
-        isPtrAddrspace3 = true;
+        ptrType && ptrType.getAddressSpace() && !op.getIsSharedMem()) {
+      isPtrAddrspace3 = true;
+    }
+
+    unsigned valueSizeFromPointer = 0;
+    if (auto ptrType = dyn_cast<PointerType>(op.getType());
+        ptrType && op.getIsSharedMem()) {
+      valueSizeFromPointer = ptrType.getPointeeType().getIntOrFloatBitWidth();
+    }
 
     // vectorized iteration through all the pointer/mask/other elements
     const int valueElemNBits =
         // Don't call getIntOrFloatBitWidth on load to shared memory,
         // the result type will be a ptr<3>
-        op.getIsSharedMem() ? 64 :
+        valueSizeFromPointer ? valueSizeFromPointer :
         std::max(8u, valueElemTy.getIntOrFloatBitWidth());
     const int numVecs = numElems / vec;
 

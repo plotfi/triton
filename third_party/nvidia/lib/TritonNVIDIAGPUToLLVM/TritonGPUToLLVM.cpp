@@ -293,9 +293,13 @@ private:
     // Ask for 16B alignment on global_smem because that's the largest we should
     // ever need (4xi32).
     auto arrayTy = LLVM::LLVMArrayType::get(elemTy, 0);
+    // TODO: Do we want to allocated the shared memory statically?
+    // auto arrayTy = LLVM::LLVMArrayType::get(elemTy, 1024);
     auto global = b.create<LLVM::GlobalOp>(
         loc, arrayTy, /*isConstant=*/false, LLVM::Linkage::External,
         "global_smem", /*value=*/Attribute(), /*alignment=*/16,
+        // TODO: Do we want to adjust alignment?
+        // "global_smem", /*value=*/Attribute(), /*alignment=*/8,
         // Add ROCm support.
         static_cast<unsigned>(NVVM::NVVMMemorySpace::kSharedMemorySpace));
   }
