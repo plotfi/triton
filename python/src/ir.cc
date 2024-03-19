@@ -1569,6 +1569,15 @@ void init_triton_ir(py::module &&m) {
         if (triton::tools::getBoolEnv("TRITON_ENABLE_LLVM_DEBUG")) {
           ::llvm::DebugFlag = true;
         }
+
+        auto *context = self.getContext();
+        context->printOpOnDiagnostic(true);
+        context->printStackTraceOnDiagnostic(true);
+        context->getDiagEngine().registerHandler([](Diagnostic &diag) {
+          llvm::outs() << diag << "\n";
+          return success();
+        });
+
         if (failed(self.run(mod.getOperation())))
           throw std::runtime_error("PassManager::run failed");
       });

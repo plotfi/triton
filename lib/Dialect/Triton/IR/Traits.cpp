@@ -257,6 +257,11 @@ bool OpTrait::impl::verifyLoadStorePointerAndValueType(Type valueType,
           rankedType.getShape(), elementPtrType.getPointeeType(),
           rankedType.getEncoding());
       return inferValueType == valueType;
+    } else {
+      auto inferValueType = RankedTensorType::get(
+          rankedType.getShape(), rankedType.getElementType(),
+          rankedType.getEncoding());
+      return inferValueType == valueType;
     }
   } else if (auto scalarPtrType = ptrType.dyn_cast<triton::PointerType>()) {
     return scalarPtrType.getPointeeType() == valueType;

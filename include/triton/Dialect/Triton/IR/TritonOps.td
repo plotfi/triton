@@ -230,7 +230,7 @@ def TT_LoadOp : TT_Op<"load",
                                       "($_op.getOperands().size() <= 2) || std::equal_to<>()">]> {
     let summary = "Load from a tensor of pointers or from a tensor pointer";
 
-    let arguments = (ins AnyTypeOf<[TT_PtrLike, TT_TensorPtr]>:$ptr, Optional<TT_BoolLike>:$mask,
+    let arguments = (ins AnyTypeOf<[TT_PtrLike, TT_TensorPtr, TT_Type]>:$ptr, Optional<TT_BoolLike>:$mask,
                          Optional<TT_Type>:$other, OptionalAttr<DenseI32ArrayAttr>:$boundaryCheck,
                          OptionalAttr<TT_PaddingOptionAttr>:$padding, TT_CacheModifierAttr:$cache,
                          TT_EvictionPolicyAttr:$evict, BoolAttr:$isVolatile, BoolAttr:$isSharedMem);

@@ -1490,6 +1490,21 @@ def dot(input, other, acc=None, allow_tf32=None, max_num_imprecise_acc=None, out
 # Non-Atomic Memory Operations
 # -----------------------
 
+@builtin
+def prefetch(pointer, mask=None, other=None, boundary_check=tuple(), padding_option="", cache_modifier="",
+         eviction_policy="", volatile=False, _builder=None):
+    mask = _constexpr_to_value(mask)
+    other = _constexpr_to_value(other)
+    if mask is not None:
+        mask = _to_tensor(mask, _builder)
+    if other is not None:
+        other = _to_tensor(other, _builder)
+    padding_option = _constexpr_to_value(padding_option)
+    cache_modifier = _constexpr_to_value(cache_modifier)
+    eviction_policy = _constexpr_to_value(eviction_policy)
+    volatile = _constexpr_to_value(volatile)
+    return semantic.load(pointer, mask, other, boundary_check, padding_option, cache_modifier, eviction_policy,
+                         volatile, is_shared=True, builder=_builder)
 
 @builtin
 def load(pointer, mask=None, other=None, boundary_check=tuple(), padding_option="", cache_modifier="",

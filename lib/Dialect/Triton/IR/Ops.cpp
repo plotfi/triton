@@ -164,6 +164,8 @@ static Type getLoadOpResultType(OpBuilder &builder, Type ptrType) {
     return ptrType.cast<PointerType>().getPointeeType();
   auto shape = ptrTensorType.getShape();
   Type elementType =
+      !ptrTensorType.getElementType().isa<PointerType>() ?
+      ptrTensorType.getElementType() :
       ptrTensorType.getElementType().cast<PointerType>().getPointeeType();
   return RankedTensorType::get(shape, elementType);
 }
