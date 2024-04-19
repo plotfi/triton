@@ -2,9 +2,11 @@ import torch
 import triton
 import triton.language as tl
 
+# JIT (jit.py):
 @triton.jit
 def triton_(src0, src1, dst):
     offset = tl.load(src0, None)
+    # OP calls into core.py
     val = tl.load(src1, None)
     tl.atomic_add(dst + offset, val)
 

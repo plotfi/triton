@@ -1174,7 +1174,7 @@ def atomic_min(ptr: tl.tensor, val: tl.tensor, mask: tl.tensor, sem: str, scope:
     ret = where(pos, pos_ret, neg_ret, builder)
     return bitcast(ret, sca_ty, builder)
 
-
+# semantic op for atomic_add:
 def atomic_add(ptr: tl.tensor, val: tl.tensor, mask: tl.tensor, sem: str, scope: str, builder: ir.builder) -> tl.tensor:
     ptr, val, mask = atom_red_typechecking_impl(ptr, val, mask, 'add', builder)
     sem = _str_to_sem(sem)

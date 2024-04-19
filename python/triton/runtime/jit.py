@@ -499,6 +499,7 @@ def jit(
     ...
 
 
+# JITs from pythons AST Module:
 def jit(
     fn: Optional[T] = None,
     *,

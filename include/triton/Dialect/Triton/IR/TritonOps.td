@@ -245,6 +245,7 @@ def TT_StoreOp : TT_Op<"store",
 //
 // Atomic Ops
 //
+// AtomicRMWOp MLIR TableGen:
 def TT_AtomicRMWOp : TT_Op<"atomic_rmw", [SameOperandsAndResultShape,
                                           SameOperandsAndResultEncoding,
                                           MemoryEffects<[MemRead<GlobalMemory>]>,

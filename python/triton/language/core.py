@@ -1272,7 +1272,7 @@ def atomic_xchg(pointer, val, mask=None, sem=None, scope=None, _builder=None):
     scope = _constexpr_to_value(scope)
     return semantic.atomic_xchg(pointer, val, mask, sem, scope, _builder)
 
-
+# core op for atomic_add:
 @builtin
 @_add_atomic_docstr("add")
 def atomic_add(pointer, val, mask=None, sem=None, scope=None, _builder=None):

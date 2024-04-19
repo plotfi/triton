@@ -1357,6 +1357,7 @@ void init_triton_ir(py::module &&m) {
              return self.create<mlir::triton::AtomicCASOp>(dstType, ptr, cmp,
                                                            val, sem, scope);
            })
+      // PYBIND'ed code for atomic_add (generates MLIR):
       .def("create_atomic_rmw",
            [](TritonOpBuilder &self, mlir::triton::RMWOp rmwOp,
               mlir::Value &ptr, mlir::Value &val, mlir::Value &mask,
@@ -1375,6 +1376,7 @@ void init_triton_ir(py::module &&m) {
                                   .cast<mlir::triton::PointerType>();
                dstType = ptrType.getPointeeType();
              }
+             // create AtomicRMWOp:
              return self.create<mlir::triton::AtomicRMWOp>(
                  dstType, rmwOp, ptr, val, mask, sem, scope);
            })
