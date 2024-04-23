@@ -1065,6 +1065,11 @@ emitBaseIndexForLayoutImpl(Location loc, RewriterBase &rewriter,
     result.erase(result.begin() + sliceLayout.getDim());
     // CTAOffset has been added in emitBaseIndexForLayout of parentLayout
     return result;
+  } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
+    auto parentLayout = dotLayout.getParent();
+    auto parentShape = shape;
+    result = emitBaseIndexForLayoutImpl(loc, rewriter, parentLayout, type,
+                                        withCTAOffset);
   } else {
     llvm_unreachable("unsupported emitBaseIndexForLayout");
   }
@@ -1127,6 +1132,9 @@ emitOffsetForLayout(Attribute layout, RankedTensorType type) {
   }
   if (auto sliceLayout = layout.dyn_cast<SliceEncodingAttr>())
     return emitOffsetForSliceLayout(sliceLayout, type);
+  if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>())
+    return emitOffsetForBlockedLayout(
+        cast<BlockedEncodingAttr>(dotLayout.getParent()), type);
   llvm_unreachable("unsupported emitOffsetForLayout");
 }
 
@@ -1396,6 +1404,7 @@ inline void storeDistributedToShared(Value src, ArrayRef<Value> inVals,
   auto inOrd = triton::gpu::getOrder(srcDistributedLayout);
   auto outOrd = dstSharedLayout.getOrder();
   unsigned inVec = inOrd == outOrd
+                       && !(srcDistributedLayout.isa<DotOperandEncodingAttr>())
                        ? triton::gpu::getUniqueContigPerThread(
                              srcDistributedLayout, srcShape)[inOrd[0]]
                        : 1;
