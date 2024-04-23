@@ -204,6 +204,9 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
       if (!loadOp)
         return;
 
+      if (!op->getNumOperands() || !op->getOperand(0).getDefiningOp())
+        return;
+
       auto ptr = op->getOperand(0);
       auto loadOpPtr = dyn_cast<triton::LoadOp>(ptr.getDefiningOp());
       if (!loadOpPtr || !loadOpPtr.getIsSharedMem())
@@ -230,6 +233,41 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
       int numCTAs = triton::gpu::TritonGPUDialect::getNumCTAs(moduleOp);
       int threadsPerWarp =
           triton::gpu::TritonGPUDialect::getThreadsPerWarp(moduleOp);
+
+      if (oldShape.size() == 2) {
+        SmallVector<unsigned, 4> sizePerThread(tensorType.getRank(), 1);
+        auto newBlockedLayout = triton::gpu::BlockedEncodingAttr::get(
+            tensorType.getContext(), oldShape, sizePerThread, oldOrder, numWarps,
+            threadsPerWarp, numCTAs);
+
+
+        std::vector<unsigned> newOrder = {oldOrder[1], oldOrder[0]};
+        auto CTALayout = newBlockedLayout.getCTALayout();
+        auto newLayout = mlir::triton::gpu::SharedEncodingAttr::get(
+            tensorType.getContext(), oldShape, newOrder, CTALayout, elementType);
+
+        auto memDescType =
+          triton::MemDescType::get(oldShape, elementType, newLayout);
+        loadOpPtr.setIsSharedMem(false);
+
+        auto localAllocOp = builder.create<triton::gpu::LocalAllocOp>(
+            loadOpPtr.getLoc(), memDescType, loadOpPtr.getResult());
+
+        auto shape = memDescType.getShape();
+        auto enc = newBlockedLayout;
+
+        // Replace the tt.load from SMEM with a triton_gpu.local_load
+        auto localLoadOp = builder.create<triton::gpu::LocalLoadOp>(
+            loadOp.getLoc(),
+            RankedTensorType::get(shape, memDescType.getElementType(), enc),
+            localAllocOp);
+
+        op->getResult(0).replaceAllUsesWith(localLoadOp);
+
+        // Erase the original operation
+        eraser.push(op);
+        return;
+      }
 
       SmallVector<unsigned, 4> sizePerThread(tensorType.getRank() + 1, 1);
       auto newBlockedLayout = triton::gpu::BlockedEncodingAttr::get(
