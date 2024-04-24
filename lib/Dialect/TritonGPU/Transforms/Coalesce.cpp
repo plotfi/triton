@@ -1,10 +1,14 @@
 #include "mlir/Analysis/SliceAnalysis.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "triton/Analysis/AxisInfo.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 #include <iterator>
 #include <numeric>
 #include <stack>
@@ -209,10 +213,91 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
 
       auto ptr = op->getOperand(0);
       auto loadOpPtr = dyn_cast<triton::LoadOp>(ptr.getDefiningOp());
+
+      bool useBasePlusOffset = false;
+      auto arith = dyn_cast_or_null<mlir::arith::AddFOp>(ptr.getDefiningOp());
+      auto splat =
+          arith ? dyn_cast<triton::SplatOp>(arith.getOperand(0).getDefiningOp())
+                : nullptr;
+
+      if (!loadOpPtr) {
+        loadOpPtr =
+            splat ? dyn_cast<triton::LoadOp>(splat.getOperand().getDefiningOp())
+                  : nullptr;
+        useBasePlusOffset = true;
+      }
+
       if (!loadOpPtr || !loadOpPtr.getIsSharedMem())
         return;
 
       OpBuilder builder(op);
+      OpBuilder builder_prefetch(splat);
+
+      int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(moduleOp);
+      int numCTAs = triton::gpu::TritonGPUDialect::getNumCTAs(moduleOp);
+      int threadsPerWarp =
+          triton::gpu::TritonGPUDialect::getThreadsPerWarp(moduleOp);
+
+      if (useBasePlusOffset) {
+
+        llvm::errs() << "Before:\n";
+        moduleOp.dump();
+
+        auto tensorType =
+            splat->getResult(0).getType().dyn_cast<RankedTensorType>();
+        auto elementType = loadOpPtr.getResult().getType();
+
+        auto srcBlocked = tensorType.getEncoding()
+                              .dyn_cast<triton::gpu::BlockedEncodingAttr>();
+
+        auto oldOrder = mlir::triton::gpu::getOrder(srcBlocked);
+        std::vector<unsigned> newOrder = {1, oldOrder[0]};
+
+        auto oldShape = tensorType.getShape();
+        std::vector<int64_t> newShape = {1, oldShape[0]};
+
+        SmallVector<unsigned, 4> sizePerThread(tensorType.getRank() + 1, 1);
+        auto newBlockedLayout = triton::gpu::BlockedEncodingAttr::get(
+            tensorType.getContext(), newShape, sizePerThread, newOrder,
+            numWarps, threadsPerWarp, numCTAs);
+
+        auto CTALayout = newBlockedLayout.getCTALayout();
+        auto newLayout = mlir::triton::gpu::SharedEncodingAttr::get(
+            tensorType.getContext(), newShape, newOrder, CTALayout,
+            elementType);
+
+        auto memDescType =
+            triton::MemDescType::get(newShape, elementType, newLayout);
+        loadOpPtr.setIsSharedMem(false);
+
+        auto localAllocOp = builder_prefetch.create<triton::gpu::LocalAllocOp>(
+            splat.getLoc(), memDescType, splat.getResult());
+        localAllocOp.getOperation()->moveAfter(splat);
+
+        splat->getResult(0).replaceAllUsesExcept(localAllocOp, localAllocOp);
+
+        auto addFOp = cast<mlir::arith::AddFOp>(loadOp.getPtr().getDefiningOp());
+
+        auto memDescSubview = builder.create<triton::gpu::MemDescSubviewOp>(loadOp.getLoc(), memDescType, addFOp.getLhs(), addFOp.getRhs());
+
+        auto enc = newBlockedLayout;
+        auto shape = memDescType.getShape();
+        auto localLoadOp = builder.create<triton::gpu::LocalLoadOp>(
+            loadOp.getLoc(),
+            RankedTensorType::get(shape, memDescType.getElementType(), enc),
+            memDescSubview);
+
+        op->getResult(0).replaceAllUsesWith(localLoadOp);
+
+        llvm::errs() << "After:\n";
+        moduleOp.dump();
+
+        // Erase the original operation
+        eraser.push(addFOp);
+        eraser.push(op);
+
+        return;
+      }
 
       // Convert the tensor operand of the tt.load(isShared = true) into a
       // MemDescType
@@ -229,17 +314,11 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
       auto oldShape = tensorType.getShape();
       std::vector<int64_t> newShape = {1, oldShape[0]};
 
-      int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(moduleOp);
-      int numCTAs = triton::gpu::TritonGPUDialect::getNumCTAs(moduleOp);
-      int threadsPerWarp =
-          triton::gpu::TritonGPUDialect::getThreadsPerWarp(moduleOp);
-
       if (oldShape.size() == 2) {
         SmallVector<unsigned, 4> sizePerThread(tensorType.getRank(), 1);
         auto newBlockedLayout = triton::gpu::BlockedEncodingAttr::get(
             tensorType.getContext(), oldShape, sizePerThread, oldOrder, numWarps,
             threadsPerWarp, numCTAs);
-
 
         std::vector<unsigned> newOrder = {oldOrder[1], oldOrder[0]};
         auto CTALayout = newBlockedLayout.getCTALayout();
