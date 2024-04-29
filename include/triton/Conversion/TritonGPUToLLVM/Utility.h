@@ -1067,7 +1067,7 @@ emitBaseIndexForLayoutImpl(Location loc, RewriterBase &rewriter,
   } else if (auto dotLayout = layout.dyn_cast<DotOperandEncodingAttr>()) {
     auto parentLayout = dotLayout.getParent();
     auto parentShape = shape;
-    result = emitBaseIndexForLayoutImpl(loc, rewriter, parentLayout, type,
+    result = emitBaseIndexForLayoutImpl(loc, rewriter, target, parentLayout, type,
                                         withCTAOffset);
   } else {
     llvm_unreachable("unsupported emitBaseIndexForLayout");
