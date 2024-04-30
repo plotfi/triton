@@ -218,4 +218,26 @@ def TTG_LocalLoadOp : TTG_Op<"local_load", [MemoryEffects<[MemRead<SharedMemory>
   let results = (outs TT_Tensor:$result);
 }
 
+def TTG_LocalGatherOp : TTG_Op<"local_gather", [MemoryEffects<[MemRead<SharedMemory>]>]> {
+  let summary = "Gather a buffer from local memory into a distributed tensor";
+
+  let description = [{
+    Gather a tensor from the local memory descriptor into a distributed tensor.
+  }];
+  let arguments = (ins TT_MemDescType:$src, TT_IntTensor:$indices, Optional<TTG_AsyncToken> :$token);
+
+  let builders = [
+      OpBuilder<(ins "Type":$retType, "Value":$src, "Value":$indices),
+      [{
+      build($_builder, $_state, retType, src, indices, /*token=*/static_cast<mlir::Value>(nullptr));
+      }]>];
+
+  let assemblyFormat = [{
+    $src `[` $indices `]` (`token` $token^)? attr-dict `:`
+    functional-type(operands, results)
+  }];
+
+  let results = (outs TT_Tensor:$result);
+}
+
 #endif
