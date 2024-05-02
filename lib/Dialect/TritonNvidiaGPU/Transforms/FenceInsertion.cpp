@@ -23,6 +23,8 @@ namespace ttng = ::mlir::triton::nvidia_gpu;
 
 using ::mlir::triton::gpu::SharedEncodingAttr;
 
+unsigned fenceInsertionCount = 0;
+
 namespace {
 
 struct FenceInsertionPass
@@ -42,6 +44,13 @@ public:
       return;
     if (::triton::tools::getBoolEnv("DISABLE_MMA_V3"))
       return;
+
+    if (fenceInsertionCount >= std::stoi(triton::tools::getenv("FENCE_THRESHOLD")))
+      return;
+
+    // fenceInsertionCount++;
+    // llvm::errs() << "Fence Insertion Count: " << fenceInsertionCount << "\n";
+
     ModuleOp mod = getOperation();
     mod.walk([&](Operation *op) {
       if (!isa<tt::DotOp, ttng::DotAsyncOp>(op))

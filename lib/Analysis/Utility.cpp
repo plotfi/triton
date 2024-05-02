@@ -13,6 +13,8 @@
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include <deque>
 
+extern unsigned fenceInsertionCount;
+
 namespace mlir {
 namespace {
 
@@ -529,6 +531,12 @@ bool supportMMA(triton::DotOp op, int version) {
   if (version == 3) {
     if (triton::tools::getBoolEnv("DISABLE_MMA_V3"))
       return false;
+    if (fenceInsertionCount >= std::stoi(triton::tools::getenv("FENCE_THRESHOLD")))
+      return false;
+
+    // fenceInsertionCount++;
+    // llvm::errs() << "Fence Insertion Count: " << fenceInsertionCount << "\n";
+
     auto retType = op.getType();
     auto retShapePerCTA = getShapePerCTA(retType);
     auto rank = retShapePerCTA.size();
