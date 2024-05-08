@@ -6,6 +6,7 @@
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 
 #include "triton/Conversion/TritonGPUToLLVM/PatternTritonGPUOpToLLVM.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using mlir::isLayoutMmaV1;
 using mlir::LLVM::getMultiDimOffset;
@@ -46,33 +47,11 @@ public:
       return lowerSharedToDistributed(op, adaptor, getTypeConverter(),
                                       rewriter);
     }
-    if (isa<DotOperandEncodingAttr>(dstLayout) &&
-        isa<BlockedEncodingAttr>(
-            cast<DotOperandEncodingAttr>(dstLayout).getParent())) {
-      return lowerSharedToDotOpFMA(op, adaptor, getTypeConverter(), rewriter);
-    }
+    llvm::llvm_unreachable_internal("expectedd LocalGatherOp to have shared encoding");
     return failure();
   }
 
 private:
-  LogicalResult
-  lowerSharedToDotOpFMA(triton::gpu::LocalGatherOp op,
-                        triton::gpu::LocalGatherOpAdaptor adaptor,
-                        const LLVMTypeConverter *typeConverter,
-                        ConversionPatternRewriter &rewriter) const {
-    auto loc = op.getLoc();
-    RankedTensorType dstTy = op.getType();
-    Attribute dstLayout = dstTy.getEncoding();
-    auto dotLayout = cast<DotOperandEncodingAttr>(dstLayout);
-    auto blockedLayout = cast<BlockedEncodingAttr>(
-        cast<DotOperandEncodingAttr>(dstLayout).getParent());
-    auto thread = getThreadId(rewriter, loc);
-    Value res = SharedToDotOperandFMA::convertLayout(
-        dotLayout.getOpIdx(), op.getSrc(), adaptor.getSrc(), blockedLayout,
-        thread, loc, getTypeConverter(), rewriter);
-    rewriter.replaceOp(op, res);
-    return success();
-  }
   LogicalResult
   lowerSharedToDistributed(triton::gpu::LocalGatherOp op,
                            triton::gpu::LocalGatherOpAdaptor adaptor,
