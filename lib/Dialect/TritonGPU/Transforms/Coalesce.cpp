@@ -306,6 +306,8 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
             RankedTensorType::get(shape, memDescType.getElementType(), enc),
             memDescSubview);
 
+/*
+*/
         auto splat = builder.create<triton::SplatOp>(loadOp.getLoc(),
             RankedTensorType::get(shape, offset.getType(), enc),
             offset);
@@ -320,6 +322,7 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
             loadOp.getLoc(),
             RankedTensorType::get(oldShape, elementType, srcBlocked),
             localGather.getResult(), false /* allowReorder */);
+            // localLoadOp.getResult(), false /* allowReorder */);
 
         op->getResult(0).replaceAllUsesWith(reshapeOp2);
 

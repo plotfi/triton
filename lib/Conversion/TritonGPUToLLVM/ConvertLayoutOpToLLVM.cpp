@@ -24,6 +24,92 @@ using ::mlir::triton::gpu::SharedEncodingAttr;
 
 namespace {
 
+
+struct LocalGatherOpConversion
+    : public ConvertOpToLLVMPattern<triton::gpu::LocalGatherOp> {
+public:
+  LocalGatherOpConversion(LLVMTypeConverter &typeConverter,
+                        const TargetInfoBase &targetInfo,
+                        PatternBenefit benefit = 1)
+      : ConvertOpToLLVMPattern(typeConverter, benefit), targetInfo(targetInfo) {
+  }
+
+  LogicalResult
+  matchAndRewrite(triton::gpu::LocalGatherOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    MemDescType srcTy = op.getSrc().getType();
+    RankedTensorType dstTy = op.getType();
+    Attribute srcLayout = srcTy.getEncoding();
+    Attribute dstLayout = dstTy.getEncoding();
+    // TODO: do we need to check if src is shared ?
+    if (isa<SharedEncodingAttr>(srcLayout) && isaDistributedLayout(dstLayout)) {
+      return lowerSharedToDistributed(op, adaptor, getTypeConverter(),
+                                      rewriter);
+    }
+    if (isa<DotOperandEncodingAttr>(dstLayout) &&
+        isa<BlockedEncodingAttr>(
+            cast<DotOperandEncodingAttr>(dstLayout).getParent())) {
+      return lowerSharedToDotOpFMA(op, adaptor, getTypeConverter(), rewriter);
+    }
+    return failure();
+  }
+
+private:
+  LogicalResult
+  lowerSharedToDotOpFMA(triton::gpu::LocalGatherOp op,
+                        triton::gpu::LocalGatherOpAdaptor adaptor,
+                        const LLVMTypeConverter *typeConverter,
+                        ConversionPatternRewriter &rewriter) const {
+    auto loc = op.getLoc();
+    RankedTensorType dstTy = op.getType();
+    Attribute dstLayout = dstTy.getEncoding();
+    auto dotLayout = cast<DotOperandEncodingAttr>(dstLayout);
+    auto blockedLayout = cast<BlockedEncodingAttr>(
+        cast<DotOperandEncodingAttr>(dstLayout).getParent());
+    auto thread = getThreadId(rewriter, loc);
+    Value res = SharedToDotOperandFMA::convertLayout(
+        dotLayout.getOpIdx(), op.getSrc(), adaptor.getSrc(), blockedLayout,
+        thread, loc, getTypeConverter(), rewriter);
+    rewriter.replaceOp(op, res);
+    return success();
+  }
+  LogicalResult
+  lowerSharedToDistributed(triton::gpu::LocalGatherOp op,
+                           triton::gpu::LocalGatherOpAdaptor adaptor,
+                           const LLVMTypeConverter *typeConverter,
+                           ConversionPatternRewriter &rewriter) const {
+    auto loc = op.getLoc();
+    auto srcTy = op.getSrc().getType();
+    auto dstTy = op.getResult().getType();
+    auto dstShape = dstTy.getShape();
+    assert(dstShape.size() <= 2 &&
+           "Unexpected rank of ConvertLayout(shared->blocked)");
+    auto srcSharedLayout = cast<SharedEncodingAttr>(srcTy.getEncoding());
+    auto dstLayout = dstTy.getEncoding();
+    auto inOrd = getOrder(srcSharedLayout);
+
+    auto smemObj = getSharedMemoryObjectFromStruct(
+        loc, adaptor.getSrc(),
+        typeConverter->convertType(srcTy.getElementType()), rewriter);
+    auto elemTy = typeConverter->convertType(dstTy.getElementType());
+
+    auto srcStrides =
+        getStridesFromShapeAndOrder(srcTy.getShape(), inOrd, loc, rewriter);
+
+    SmallVector<Value> outVals =
+        loadSharedToDistributed(op.getResult(), op.getSrc(), smemObj, elemTy,
+                                loc, rewriter, targetInfo);
+
+    Value result = packLLElements(loc, typeConverter, outVals, rewriter, dstTy);
+    rewriter.replaceOp(op, result);
+
+    return success();
+  }
+
+private:
+  const TargetInfoBase &targetInfo;
+};
+
 struct LocalLoadOpConversion
     : public ConvertOpToLLVMPattern<triton::gpu::LocalLoadOp> {
 public:
@@ -321,4 +407,5 @@ void mlir::triton::populateConvertLayoutOpToLLVMPatterns(
     RewritePatternSet &patterns, PatternBenefit benefit) {
   patterns.add<ConvertLayoutOpConversion>(typeConverter, targetInfo, benefit);
   patterns.add<LocalLoadOpConversion>(typeConverter, targetInfo, benefit);
+  patterns.add<LocalGatherOpConversion>(typeConverter, targetInfo, benefit);
 }
