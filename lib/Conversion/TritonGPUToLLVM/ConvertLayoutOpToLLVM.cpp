@@ -7,6 +7,7 @@
 
 #include "triton/Conversion/TritonGPUToLLVM/PatternTritonGPUOpToLLVM.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 
 using mlir::isLayoutMmaV1;
 using mlir::LLVM::getMultiDimOffset;
@@ -38,6 +39,14 @@ public:
   LogicalResult
   matchAndRewrite(triton::gpu::LocalGatherOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+
+    llvm::errs() << "LOCAL GATHER:\n";
+    op.dump();
+    llvm::errs() << "\top1: ";
+    op.getSrc().dump();
+    llvm::errs() << "\top2: ";
+    op.getIndices().dump();
+
     MemDescType srcTy = op.getSrc().getType();
     RankedTensorType dstTy = op.getType();
     Attribute srcLayout = srcTy.getEncoding();
@@ -63,21 +72,17 @@ private:
     auto dstShape = dstTy.getShape();
     assert(dstShape.size() <= 2 &&
            "Unexpected rank of ConvertLayout(shared->blocked)");
-    auto srcSharedLayout = cast<SharedEncodingAttr>(srcTy.getEncoding());
-    auto dstLayout = dstTy.getEncoding();
-    auto inOrd = getOrder(srcSharedLayout);
 
-    auto smemObj = getSharedMemoryObjectFromStruct(
-        loc, adaptor.getSrc(),
-        typeConverter->convertType(srcTy.getElementType()), rewriter);
+    auto smemObj =
+      getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(),
+                                      typeConverter->convertType(
+                                        srcTy.getElementType()), rewriter);
+
     auto elemTy = typeConverter->convertType(dstTy.getElementType());
 
-    auto srcStrides =
-        getStridesFromShapeAndOrder(srcTy.getShape(), inOrd, loc, rewriter);
-
     SmallVector<Value> outVals =
-        loadSharedToDistributed(op.getResult(), op.getSrc(), smemObj, elemTy,
-                                loc, rewriter, targetInfo);
+        gatherSharedToDistributed(op.getResult(), op.getSrc(), op.getIndices(),
+                                  smemObj, elemTy, loc, rewriter, targetInfo);
 
     Value result = packLLElements(loc, typeConverter, outVals, rewriter, dstTy);
     rewriter.replaceOp(op, result);

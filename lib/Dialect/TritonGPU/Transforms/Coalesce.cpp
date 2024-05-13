@@ -222,18 +222,12 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
       Value offset = nullptr;
 
       // Handle the base + offset case
-      auto addFOp = dyn_cast<mlir::arith::AddFOp>(ptr.getDefiningOp());
-      if (!prefetchLoad && addFOp) {
-        if (auto splat = dyn_cast<mlir::triton::SplatOp>(
-                addFOp.getOperand(1).getDefiningOp());
-            splat) {
-          auto sitofp =
-              dyn_cast<arith::SIToFPOp>(splat.getOperand().getDefiningOp());
-          offset = sitofp ? sitofp.getOperand() : nullptr;
-        }
-
-        prefetchLoad =
-            dyn_cast<triton::LoadOp>(addFOp.getOperand(0).getDefiningOp());
+      auto addOp = dyn_cast<mlir::arith::AddIOp>(ptr.getDefiningOp());
+      arith::ExtSIOp ext = nullptr;
+      if (!prefetchLoad && addOp) {
+        offset = addOp.getOperand(1);
+        ext = dyn_cast<arith::ExtSIOp>(addOp.getOperand(0).getDefiningOp());
+        prefetchLoad = ext ? dyn_cast<triton::LoadOp>(ext.getOperand().getDefiningOp()) : nullptr;
       }
 
       if (!prefetchLoad || !prefetchLoad.getIsSharedMem())
@@ -250,26 +244,27 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
       // handle the base + offset case
       if (prefetchLoad && offset) {
         auto tensorType =
-            prefetchLoad->getResult(0).getType().dyn_cast<RankedTensorType>();
+            ext->getResult(0).getType().dyn_cast<RankedTensorType>();
         auto elementType = tensorType.getElementType();
 
         auto srcBlocked = tensorType.getEncoding()
                               .dyn_cast<triton::gpu::BlockedEncodingAttr>();
 
         auto oldOrder = mlir::triton::gpu::getOrder(srcBlocked);
-        std::vector<unsigned> newOrder = {1, oldOrder[0]};
+        std::vector<unsigned> newOrder = {0, oldOrder[0]};
 
         auto oldShape = tensorType.getShape();
-        std::vector<int64_t> newShape = {1, oldShape[0]};
+        std::vector<int64_t> newShape = {1, oldShape[1]};
 
-        SmallVector<unsigned, 4> sizePerThread(tensorType.getRank() + 1, 1);
+        SmallVector<unsigned, 4> sizePerThread(tensorType.getRank(), 1);
         auto newBlockedLayout = triton::gpu::BlockedEncodingAttr::get(
             tensorType.getContext(), newShape, sizePerThread, newOrder,
             numWarps, threadsPerWarp, numCTAs);
 
+        std::vector<int64_t> fakeShape = {oldShape[1], 1};
         auto CTALayout = newBlockedLayout.getCTALayout();
         auto newLayout = mlir::triton::gpu::SharedEncodingAttr::get(
-            tensorType.getContext(), newShape, newOrder, CTALayout,
+            tensorType.getContext(), fakeShape, newOrder, CTALayout,
             elementType);
 
         auto memDescType =
@@ -280,54 +275,59 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
         // Eventually we will want to drop this load in favor of a async.cp
         prefetchLoad.setIsSharedMem(false);
 
-        auto reshapeOp = builder.create<triton::ReshapeOp>(
-            prefetchLoad.getLoc(),
-            RankedTensorType::get(newShape, elementType, newBlockedLayout),
-            prefetchLoad.getResult(), false /* allowReorder */);
-        reshapeOp.getOperation()->moveAfter(prefetchLoad);
+        // auto reshapeOp = builder.create<triton::ReshapeOp>(
+        //     prefetchLoad.getLoc(),
+        //     RankedTensorType::get(newShape, elementType, newBlockedLayout),
+        //     prefetchLoad.getResult(), false /* allowReorder */);
+        // reshapeOp.getOperation()->moveAfter(prefetchLoad);
 
         auto localAllocOp = builder_prefetch.create<triton::gpu::LocalAllocOp>(
-            prefetchLoad.getLoc(), memDescType, reshapeOp.getResult());
-        localAllocOp.getOperation()->moveAfter(reshapeOp);
+            prefetchLoad.getLoc(), memDescType, ext.getResult());
+        localAllocOp.getOperation()->moveAfter(ext);
 
-        prefetchLoad->getResult(0).replaceAllUsesExcept(localAllocOp,
-                                                        reshapeOp);
-        SmallVector<Value> offsetsVal;
-        offsetsVal.push_back(
-            builder.create<arith::ConstantIntOp>(loadOp.getLoc(), 0, 32));
-        offsetsVal.push_back(offset);
-        auto memDescSubview = builder.create<triton::gpu::MemDescSubviewOp>(
-            loadOp.getLoc(), memDescType, localAllocOp, offsetsVal);
+        ext->getResult(0).replaceAllUsesExcept(localAllocOp,
+                                                        localAllocOp);
+        // SmallVector<Value> offsetsVal;
+        // offsetsVal.push_back(
+        //     builder.create<arith::ConstantIntOp>(loadOp.getLoc(), 0, 32));
+        // offsetsVal.push_back(offset);
+        // auto memDescSubview = builder.create<triton::gpu::MemDescSubviewOp>(
+        //     loadOp.getLoc(), memDescType, localAllocOp, offsetsVal);
 
-        auto enc = newBlockedLayout;
-        auto shape = memDescType.getShape();
-        auto localLoadOp = builder.create<triton::gpu::LocalLoadOp>(
-            loadOp.getLoc(),
-            RankedTensorType::get(shape, memDescType.getElementType(), enc),
-            memDescSubview);
+        // auto enc = newBlockedLayout;
+        // auto shape = memDescType.getShape();
+        // auto localLoadOp = builder.create<triton::gpu::LocalLoadOp>(
+        //     loadOp.getLoc(),
+        //     RankedTensorType::get(shape, memDescType.getElementType(), enc),
+        //     memDescSubview);
 
 /*
 */
-        auto splat = builder.create<triton::SplatOp>(loadOp.getLoc(),
-            RankedTensorType::get(shape, offset.getType(), enc),
-            offset);
+        // auto splat = builder.create<triton::SplatOp>(loadOp.getLoc(),
+        //     RankedTensorType::get(shape, offset.getType(), enc),
+        //     offset);
+
+        auto shape = memDescType.getShape();
+        auto indexBlockedLayout =
+          offset.getType().dyn_cast<RankedTensorType>()
+          .getEncoding().dyn_cast<triton::gpu::BlockedEncodingAttr>();
 
         auto localGather = builder.create<triton::gpu::LocalGatherOp>(
             loadOp.getLoc(),
-            RankedTensorType::get(shape, memDescType.getElementType(), enc),
+            RankedTensorType::get(shape, memDescType.getElementType(), newBlockedLayout),
             localAllocOp,
-            splat.getResult());
+            offset);
 
-        auto reshapeOp2 = builder.create<triton::ReshapeOp>(
-            loadOp.getLoc(),
-            RankedTensorType::get(oldShape, elementType, srcBlocked),
-            localGather.getResult(), false /* allowReorder */);
-            // localLoadOp.getResult(), false /* allowReorder */);
+        // auto reshapeOp2 = builder.create<triton::ReshapeOp>(
+        //     loadOp.getLoc(),
+        //     RankedTensorType::get(oldShape, elementType, srcBlocked),
+        //     localGather.getResult(), false /* allowReorder */);
+        //     // localLoadOp.getResult(), false /* allowReorder */);
 
-        op->getResult(0).replaceAllUsesWith(reshapeOp2);
+        op->getResult(0).replaceAllUsesWith(localGather);
 
         // Erase the original operation
-        eraser.push(addFOp);
+        eraser.push(addOp);
         eraser.push(op);
 
         return;
