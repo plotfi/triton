@@ -39,14 +39,6 @@ public:
   LogicalResult
   matchAndRewrite(triton::gpu::LocalGatherOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-
-    llvm::errs() << "LOCAL GATHER:\n";
-    op.dump();
-    llvm::errs() << "\top1: ";
-    op.getSrc().dump();
-    llvm::errs() << "\top2: ";
-    op.getIndices().dump();
-
     MemDescType srcTy = op.getSrc().getType();
     RankedTensorType dstTy = op.getType();
     Attribute srcLayout = srcTy.getEncoding();

@@ -227,7 +227,9 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
       if (!prefetchLoad && addOp) {
         offset = addOp.getOperand(1);
         ext = dyn_cast<arith::ExtSIOp>(addOp.getOperand(0).getDefiningOp());
-        prefetchLoad = ext ? dyn_cast<triton::LoadOp>(ext.getOperand().getDefiningOp()) : nullptr;
+        prefetchLoad =
+            ext ? dyn_cast<triton::LoadOp>(ext.getOperand().getDefiningOp())
+                : nullptr;
       }
 
       if (!prefetchLoad || !prefetchLoad.getIsSharedMem())
@@ -257,174 +259,59 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
         std::vector<int64_t> newShape = {1, oldShape[1]};
 
         SmallVector<unsigned, 4> sizePerThread(tensorType.getRank(), 1);
-        auto newBlockedLayout = triton::gpu::BlockedEncodingAttr::get(
-            tensorType.getContext(), newShape, sizePerThread, newOrder,
-            numWarps, threadsPerWarp, numCTAs);
-
-        std::vector<int64_t> fakeShape = {oldShape[1], 1};
-        auto CTALayout = newBlockedLayout.getCTALayout();
-        auto newLayout = mlir::triton::gpu::SharedEncodingAttr::get(
-            tensorType.getContext(), fakeShape, newOrder, CTALayout,
-            elementType);
-
-        auto memDescType =
-            triton::MemDescType::get(newShape, elementType, newLayout);
 
         // We can drop the isSharedMem tag here, because the expansion is done
         // and we can treat this load as a normal load from dram.
         // Eventually we will want to drop this load in favor of a async.cp
         prefetchLoad.setIsSharedMem(false);
 
-        // auto reshapeOp = builder.create<triton::ReshapeOp>(
-        //     prefetchLoad.getLoc(),
-        //     RankedTensorType::get(newShape, elementType, newBlockedLayout),
-        //     prefetchLoad.getResult(), false /* allowReorder */);
-        // reshapeOp.getOperation()->moveAfter(prefetchLoad);
+        std::vector<int64_t> reshapeShape1 = {oldShape[1], 1};
+        auto newLayout = mlir::triton::gpu::SharedEncodingAttr::get(
+            tensorType.getContext(), reshapeShape1, newOrder,
+            srcBlocked.getCTALayout(), elementType);
+
+        auto memDescType =
+            triton::MemDescType::get(reshapeShape1, elementType, newLayout);
+
+        auto newBlockedLayoutReshape = triton::gpu::BlockedEncodingAttr::get(
+            tensorType.getContext(), reshapeShape1, sizePerThread, oldOrder,
+            numWarps, threadsPerWarp, numCTAs);
+
+        auto reshapeOp1 = builder.create<triton::ReshapeOp>(
+            prefetchLoad.getLoc(),
+            RankedTensorType::get(reshapeShape1, elementType,
+                                  newBlockedLayoutReshape),
+            ext.getResult(), false /* allowReorder */);
+        reshapeOp1.getOperation()->moveAfter(ext);
 
         auto localAllocOp = builder_prefetch.create<triton::gpu::LocalAllocOp>(
-            prefetchLoad.getLoc(), memDescType, ext.getResult());
-        localAllocOp.getOperation()->moveAfter(ext);
+            prefetchLoad.getLoc(), memDescType, reshapeOp1.getResult());
+        localAllocOp.getOperation()->moveAfter(reshapeOp1);
 
-        ext->getResult(0).replaceAllUsesExcept(localAllocOp,
-                                                        localAllocOp);
-        // SmallVector<Value> offsetsVal;
-        // offsetsVal.push_back(
-        //     builder.create<arith::ConstantIntOp>(loadOp.getLoc(), 0, 32));
-        // offsetsVal.push_back(offset);
-        // auto memDescSubview = builder.create<triton::gpu::MemDescSubviewOp>(
-        //     loadOp.getLoc(), memDescType, localAllocOp, offsetsVal);
-
-        // auto enc = newBlockedLayout;
-        // auto shape = memDescType.getShape();
-        // auto localLoadOp = builder.create<triton::gpu::LocalLoadOp>(
-        //     loadOp.getLoc(),
-        //     RankedTensorType::get(shape, memDescType.getElementType(), enc),
-        //     memDescSubview);
-
-/*
-*/
-        // auto splat = builder.create<triton::SplatOp>(loadOp.getLoc(),
-        //     RankedTensorType::get(shape, offset.getType(), enc),
-        //     offset);
+        ext->getResult(0).replaceAllUsesExcept(localAllocOp, reshapeOp1);
 
         auto shape = memDescType.getShape();
         auto indexBlockedLayout =
-          offset.getType().dyn_cast<RankedTensorType>()
-          .getEncoding().dyn_cast<triton::gpu::BlockedEncodingAttr>();
+            offset.getType()
+                .dyn_cast<RankedTensorType>()
+                .getEncoding()
+                .dyn_cast<triton::gpu::BlockedEncodingAttr>();
 
         auto localGather = builder.create<triton::gpu::LocalGatherOp>(
             loadOp.getLoc(),
-            RankedTensorType::get(shape, memDescType.getElementType(), newBlockedLayout),
-            localAllocOp,
-            offset);
-
-        // auto reshapeOp2 = builder.create<triton::ReshapeOp>(
-        //     loadOp.getLoc(),
-        //     RankedTensorType::get(oldShape, elementType, srcBlocked),
-        //     localGather.getResult(), false /* allowReorder */);
-        //     // localLoadOp.getResult(), false /* allowReorder */);
+            RankedTensorType::get(newShape, memDescType.getElementType(),
+                                  loadOp.getResult()
+                                      .getType()
+                                      .dyn_cast<RankedTensorType>()
+                                      .getEncoding()),
+            localAllocOp, offset);
 
         op->getResult(0).replaceAllUsesWith(localGather);
 
         // Erase the original operation
         eraser.push(addOp);
         eraser.push(op);
-
-        return;
       }
-
-      // Convert the tensor operand of the tt.load(isShared = true) into a
-      // MemDescType
-      auto tensorType =
-          prefetchLoad->getResult(0).getType().cast<RankedTensorType>();
-      auto elementType = tensorType.getElementType();
-
-      auto srcBlocked =
-          tensorType.getEncoding().dyn_cast<triton::gpu::BlockedEncodingAttr>();
-
-      auto oldOrder = mlir::triton::gpu::getOrder(srcBlocked);
-      std::vector<unsigned> newOrder = {1, oldOrder[0]};
-
-      auto oldShape = tensorType.getShape();
-      std::vector<int64_t> newShape = {1, oldShape[0]};
-
-      if (oldShape.size() == 2) {
-        SmallVector<unsigned, 4> sizePerThread(tensorType.getRank(), 1);
-        auto newBlockedLayout = triton::gpu::BlockedEncodingAttr::get(
-            tensorType.getContext(), oldShape, sizePerThread, oldOrder,
-            numWarps, threadsPerWarp, numCTAs);
-
-        std::vector<unsigned> newOrder = {oldOrder[1], oldOrder[0]};
-        auto CTALayout = newBlockedLayout.getCTALayout();
-        auto newLayout = mlir::triton::gpu::SharedEncodingAttr::get(
-            tensorType.getContext(), oldShape, newOrder, CTALayout,
-            elementType);
-
-        auto memDescType =
-            triton::MemDescType::get(oldShape, elementType, newLayout);
-        prefetchLoad.setIsSharedMem(false);
-
-        auto localAllocOp = builder.create<triton::gpu::LocalAllocOp>(
-            prefetchLoad.getLoc(), memDescType, prefetchLoad.getResult());
-
-        auto shape = memDescType.getShape();
-        auto enc = newBlockedLayout;
-
-        // Replace the tt.load from SMEM with a triton_gpu.local_load
-        auto localLoadOp = builder.create<triton::gpu::LocalLoadOp>(
-            loadOp.getLoc(),
-            RankedTensorType::get(shape, memDescType.getElementType(), enc),
-            localAllocOp);
-
-        op->getResult(0).replaceAllUsesWith(localLoadOp);
-
-        // Erase the original operation
-        eraser.push(op);
-        return;
-      }
-
-      SmallVector<unsigned, 4> sizePerThread(tensorType.getRank() + 1, 1);
-      auto newBlockedLayout = triton::gpu::BlockedEncodingAttr::get(
-          tensorType.getContext(), newShape, sizePerThread, newOrder, numWarps,
-          threadsPerWarp, numCTAs);
-
-      auto reshapeOp = builder.create<triton::ReshapeOp>(
-          loadOp.getLoc(),
-          RankedTensorType::get(newShape, elementType, newBlockedLayout),
-          prefetchLoad.getResult(), false /* allowReorder */);
-
-      auto CTALayout = newBlockedLayout.getCTALayout();
-      auto newLayout = mlir::triton::gpu::SharedEncodingAttr::get(
-          tensorType.getContext(), newShape, newOrder, CTALayout, elementType);
-
-      auto memDescType =
-          triton::MemDescType::get(newShape, elementType, newLayout);
-      prefetchLoad.setIsSharedMem(false);
-
-      // Replace the original tt.load(isShared = true) with the
-      // triton_gpu.local_alloc(tt.load(isShared = false)) instruction sequence
-      auto localAllocOp = builder.create<triton::gpu::LocalAllocOp>(
-          prefetchLoad.getLoc(), memDescType, reshapeOp.getResult());
-
-      auto loadOpType = cast<RankedTensorType>(loadOp.getType());
-      auto shape = memDescType.getShape();
-      auto enc = newBlockedLayout;
-
-      // Replace the tt.load from SMEM with a triton_gpu.local_load
-      auto localLoadOp = builder.create<triton::gpu::LocalLoadOp>(
-          loadOp.getLoc(),
-          RankedTensorType::get(shape, memDescType.getElementType(), enc),
-          localAllocOp);
-
-      auto reshapeOp2 = builder.create<triton::ReshapeOp>(
-          loadOp.getLoc(),
-          RankedTensorType::get(oldShape, elementType, srcBlocked),
-          localLoadOp.getResult(), false /* allowReorder */);
-
-      op->getResult(0).replaceAllUsesWith(reshapeOp2);
-
-      // Erase the original operation
-      eraser.push(op);
     });
 
     while (!eraser.empty()) {

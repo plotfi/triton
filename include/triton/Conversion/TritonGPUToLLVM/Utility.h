@@ -1162,6 +1162,145 @@ emitIndices(Location loc, RewriterBase &rewriter, const TargetInfoBase &target,
   return multiDimIdx;
 }
 
+inline DenseMap<unsigned, Value> getSwizzledSharedPtrs_FAKE(
+    Location loc, const TargetInfoBase &target, unsigned inVec,
+    RankedTensorType srcTy, triton::gpu::SharedEncodingAttr resSharedLayout,
+    Type resElemTy, SharedMemoryObject smemObj, RewriterBase &rewriter,
+    SmallVectorImpl<Value> &offsetVals, SmallVectorImpl<Value> &srcStrides) {
+  auto dstPtrTy = ptr_ty(rewriter.getContext(), 3);
+  auto dstOffset = dot(rewriter, loc, offsetVals, smemObj.strides);
+  Value dstPtrBase = gep(dstPtrTy, resElemTy, smemObj.base, dstOffset);
+
+  auto srcEncoding = srcTy.getEncoding();
+  auto srcShape = srcTy.getShape();
+  auto srcShapePerCTA = triton::gpu::getShapePerCTA(srcTy);
+  unsigned numElems = triton::gpu::getTotalElemsPerThread(srcTy);
+  // swizzling params as described in TritonGPUAttrDefs.td
+  unsigned outVec = resSharedLayout.getVec();
+  unsigned perPhase = resSharedLayout.getPerPhase();
+  unsigned maxPhase = resSharedLayout.getMaxPhase();
+  // Order
+  auto inOrder = triton::gpu::getOrder(srcEncoding);
+  auto outOrder = triton::gpu::getOrder(resSharedLayout);
+  outOrder[0] = 1;
+  outOrder[1] = 0;
+  assert(maxPhase == 1 ||
+         outVec * maxPhase <= srcShape[outOrder[0]] &&
+             "Swizzling would generate out of bounds memory accesses");
+  // Tensor indices held by the current thread, as LLVM values
+  auto srcIndices =
+      emitIndices(loc, rewriter, target, srcEncoding, srcTy, false);
+  // Swizzling with leading offsets (e.g. Hopper GMMA)
+  unsigned swizzlingByteWidth = 0;
+  if (resSharedLayout.getHasLeadingOffset()) {
+    if (perPhase == 4 && maxPhase == 2)
+      swizzlingByteWidth = 32;
+    else if (perPhase == 2 && maxPhase == 4)
+      swizzlingByteWidth = 64;
+    else if (perPhase == 1 && maxPhase == 8)
+      swizzlingByteWidth = 128;
+    else
+      llvm::report_fatal_error("Unsupported shared layout.");
+  }
+  unsigned numElemsPerSwizzlingRow =
+      swizzlingByteWidth * 8 / resElemTy.getIntOrFloatBitWidth();
+  Value numElemsPerSwizzlingRowVal = i32_val(numElemsPerSwizzlingRow);
+  unsigned leadingDimOffset;
+  if (outOrder.size() >= 2) {
+    leadingDimOffset = numElemsPerSwizzlingRow * srcShapePerCTA[outOrder[1]];
+  } else {
+    leadingDimOffset = numElemsPerSwizzlingRow;
+  }
+
+  Value leadingDimOffsetVal = i32_val(leadingDimOffset);
+  // Return values
+  DenseMap<unsigned, Value> ret;
+  // cache for non-immediate offsets
+  DenseMap<unsigned, Value> cacheCol, cacheRow;
+  unsigned minVec = std::min(outVec, inVec);
+  Value strideRow = outOrder.size() >= 2 ? srcStrides[outOrder[1]] : i32_val(0);
+  Value strideCol = srcStrides[outOrder[0]];
+  LDBG("getSwizzledSharedPtrs: perPhase = "
+       << perPhase << " maxPhase = " << maxPhase << " minVec = " << minVec
+       << " inVec = " << inVec << " outVec = " << outVec << " strideRow "
+       << strideRow << " strideCol " << strideCol);
+  for (unsigned elemIdx = 0; elemIdx < numElems; elemIdx += minVec) {
+    Value offset = i32_val(0);
+    // Extract multi dimensional index for current element
+    auto idx = srcIndices[elemIdx];
+    Value idxCol = idx[outOrder[0]]; // contiguous dimension
+    Value idxRow;
+    if (outOrder.size() >= 2) {
+      idxRow = idx[outOrder[1]]; // discontiguous dimension
+    } else {
+      idxRow = i32_val(0);
+    }
+    // compute phase = (row // perPhase) % maxPhase
+    Value phase = urem(udiv(idxRow, i32_val(perPhase)), i32_val(maxPhase));
+    // extract dynamic/static offset for immediate offsetting
+    unsigned immedateOffCol = 0;
+    unsigned immedateOffRow = 0;
+    if (leadingDimOffset) {
+      // hopper
+      offset =
+          mul(udiv(idxCol, numElemsPerSwizzlingRowVal), leadingDimOffsetVal);
+      // Shrink by swizzling blocks
+      idxCol = urem(idxCol, numElemsPerSwizzlingRowVal);
+      strideRow = numElemsPerSwizzlingRowVal;
+    }
+    if (auto add = dyn_cast_or_null<LLVM::AddOp>(idxCol.getDefiningOp())) {
+      if (auto _cst = dyn_cast_or_null<LLVM::ConstantOp>(
+              add.getRhs().getDefiningOp())) {
+        unsigned cst =
+            cast<IntegerAttr>(_cst.getValue()).getValue().getSExtValue();
+        unsigned key = cst % (outVec * maxPhase);
+        cacheCol.insert({key, idxCol});
+        idxCol = cacheCol[key];
+        immedateOffCol = cst / (outVec * maxPhase) * (outVec * maxPhase);
+      }
+    }
+    if (auto add = dyn_cast_or_null<LLVM::AddOp>(idxRow.getDefiningOp())) {
+      if (auto _cst = dyn_cast_or_null<LLVM::ConstantOp>(
+              add.getRhs().getDefiningOp())) {
+        unsigned cst =
+            mlir::cast<IntegerAttr>(_cst.getValue()).getValue().getSExtValue();
+        unsigned key = cst % (perPhase * maxPhase);
+        cacheRow.insert({key, idxRow});
+        idxRow = cacheRow[key];
+        immedateOffRow = cst / (perPhase * maxPhase) * (perPhase * maxPhase);
+      }
+    }
+    // row offset is simply row index
+    Value rowOff = mul(idxRow, strideRow);
+    // because swizzling happens at a granularity of outVec, we need to
+    // decompose the offset into a swizzled factor and a non-swizzled
+    // (ordered) factor: colOffSwizzled = ((col // outVec) ^ phase) * outVec
+    // colOffOrdered = (col % outVec) // minVec * minVec
+    Value colOffSwizzled = xor_(udiv(idxCol, i32_val(outVec)), phase);
+    colOffSwizzled = mul(colOffSwizzled, i32_val(outVec));
+    Value colOffOrdered = urem(idxCol, i32_val(outVec));
+    colOffOrdered = udiv(colOffOrdered, i32_val(minVec));
+    colOffOrdered = mul(colOffOrdered, i32_val(minVec));
+    Value colOff = add(colOffSwizzled, colOffOrdered);
+    // compute non-immediate offset
+    if (outOrder.size() == 3)
+      offset = add(offset, mul(idx[outOrder[2]], srcStrides[outOrder[2]]));
+    offset = add(offset, add(rowOff, mul(colOff, strideCol)));
+    Value currPtr = gep(dstPtrTy, resElemTy, dstPtrBase, offset);
+    // compute immediate offset
+    Value immediateOff;
+    if (outOrder.size() >= 2) {
+      immediateOff =
+          add(mul(i32_val(immedateOffRow), strideRow), i32_val(immedateOffCol));
+    } else {
+      immediateOff = i32_val(immedateOffCol);
+    }
+
+    ret[elemIdx] = gep(dstPtrTy, resElemTy, currPtr, immediateOff);
+  }
+  return ret;
+}
+
 /* ---------------- */
 /* ---------------- */
 inline DenseMap<unsigned, Value> getSwizzledSharedPtrs(
@@ -1339,9 +1478,6 @@ gatherSharedToDistributed(Value dst, Value src, Value indices,
   auto srcTy = cast<MemDescType>(src.getType());
   auto dstDistributedLayout = dstTy.getEncoding();
 
-  llvm::errs() << "dst encoding: ";
-  dstDistributedLayout.dump();
-
   auto srcSharedLayout =
       cast<triton::gpu::SharedEncodingAttr>(srcTy.getEncoding());
   auto inOrd = triton::gpu::getOrder(srcSharedLayout);
@@ -1361,30 +1497,23 @@ gatherSharedToDistributed(Value dst, Value src, Value indices,
   unsigned outElems = triton::gpu::getTotalElemsPerThread(dstTy);
   SmallVector<Value> offsetVals = {smemObj.strides.size(), i32_val(0)};
 
-
-
-
-
-  if (auto ptrTensorType = dyn_cast<RankedTensorType>(indices.getType())) {
-    llvm::errs() << "Tensor Indices Type: ";
-    ptrTensorType.dump();
-    auto shape = ptrTensorType.getShape();
-    llvm::errs() << "TENSOR OF INDICES SHAPE RANK: " << shape.size() << "\n";
-    llvm::errs() << "TENSOR OF INDICES: ";
-    indices.getAsOpaquePointer();
-    indices.dump();
-  }
-
+  //if (auto ptrTensorType = dyn_cast<RankedTensorType>(indices.getType())) {
+  //  llvm::errs() << "Tensor Indices Type: ";
+  //  ptrTensorType.dump();
+  //  auto shape = ptrTensorType.getShape();
+  //  llvm::errs() << "TENSOR OF INDICES SHAPE RANK: " << shape.size() << "\n";
+  //  llvm::errs() << "TENSOR OF INDICES: ";
+  //  indices.getAsOpaquePointer();
+  //  indices.dump();
+  //}
 
   DenseMap<unsigned, Value> sharedPtrs =
-      getSwizzledSharedPtrs(loc, target, outVec, dstTy, srcSharedLayout, elemTy,
+      getSwizzledSharedPtrs_FAKE(loc, target, outVec, dstTy, srcSharedLayout, elemTy,
                             smemObj, rewriter, offsetVals, smemObj.strides);
 
   assert(outElems % minVec == 0 && "Unexpected number of elements");
   unsigned numVecs = outElems / minVec;
   auto wordTy = vec_ty(elemTy, minVec);
-  llvm::errs() << "WORD TY: ";
-  wordTy.dump();
   SmallVector<Value> outVals(outElems);
   for (unsigned i = 0; i < numVecs; ++i) {
     Value smemAddr = sharedPtrs[i * minVec];
