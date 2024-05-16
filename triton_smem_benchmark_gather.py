@@ -182,7 +182,8 @@ def triton_local_gather(base_ptr, vec_ptr, ts_0_ptrs, ts_1_ptrs, out_ptr1, xnume
     ### TRITON_SMEM, local_gather preload to smem
     ### this is expected to produce ttg.local_alloc(tt.load)
     base_block = base_ptr + rbase
-    base_ptr_smem = tl.load(base_block, None, eviction_policy='evict_first', shared=True)
+    base_ptr_smem = tl.load(base_block, None, eviction_policy='evict_first', shared=use_smem)
+    # tl.device_print("base: ", base_ptr_smem)
 
     for roffset in range(0, rnumel, RBLOCK):
         rindex = roffset + rbase
@@ -197,7 +198,8 @@ def triton_local_gather(base_ptr, vec_ptr, ts_0_ptrs, ts_1_ptrs, out_ptr1, xnume
 
         ### TRITON_SMEM, local_gather read from smem
         ### this is expected to produce ttg.local_gather(base_ptr_smem, ts)
-        tmp4 = tl.load(base_ptr_smem + ts)
+        tmp4 = tl.load(base_ptr_smem + ts) if use_smem else base_ptr_smem
+        # tmp4 = tl.reshape(tmp4, (1, 2048))
 
         tmp5 = tmp4.to(tl.float32)
         tmp6 = tmp5.to(tl.float32)
@@ -210,7 +212,8 @@ def triton_local_gather(base_ptr, vec_ptr, ts_0_ptrs, ts_1_ptrs, out_ptr1, xnume
     tmp13 = tmp11.to(tl.float32)
     tl.store(out_ptr1 + (x0), tmp13, None)
 
-benchmark_iters = 10000
+benchmark_iters = 100000
+use_smem = False
 
 def triton_gemv_0(base, vec, ts_0, ts_1, benchmark: bool = False):
     S, = vec.shape
@@ -232,19 +235,20 @@ def triton_gemv_0(base, vec, ts_0, ts_1, benchmark: bool = False):
         gather_kernel = triton_local_gather if is_local_gather else triton_global_gather
 
         if benchmark:
-            print(f"Benchmarking {'local' if is_local_gather else 'global'} gather for shape [{S}]")
+            print(f"Benchmarking {'local' if is_local_gather else 'global'} gather for shape [{S}] {benchmark_iters} iterations")
+
             # Warm up GPU
+            print("pre-warming up GPU... 10 iterations...")
             for _ in range(10):
                 gather_kernel[grid](base, vec, ts_0, ts_1, buf1, xnumel, rnumel)
             torch.cuda.synchronize()
 
             # Timing the matmul
-            start_time = time.time()
-            for _ in range(benchmark_iters):
-                gather_kernel[grid](base, vec, ts_0, ts_1, buf1, xnumel, rnumel)
-            torch.cuda.synchronize()
-            elapsed_time = time.time() - start_time
-            print(f"Elapsed gather kernel time for {benchmark_iters} iterations: {elapsed_time:.6f} seconds")
+            with torch.autograd.profiler.profile(use_cuda=True) as prof:
+                for _ in range(benchmark_iters):
+                    gather_kernel[grid](base, vec, ts_0, ts_1, buf1, xnumel, rnumel)
+                    torch.cuda.synchronize()
+            print(f"Elapsed gather kernel time for {benchmark_iters} iterations, prof:\n{prof}")
         else:
             print(f"Running {'local' if is_local_gather else 'global'} gather for shape [{S}]")
             gather_kernel[grid](base, vec, ts_0, ts_1, buf1, xnumel, rnumel)
@@ -270,12 +274,34 @@ def get_x_val(example_inputs) -> float:
     s = vec.size()
     return s
 
+from typing import List, Optional, Sequence, Union
+def rand_strided_intrand(
+    size: Sequence[int],
+    stride: Sequence[int],
+    dtype: torch.dtype = torch.float32,
+    device: Union[str, torch.device] = "cpu",
+    extra_size: int = 0,
+):
+    needed_size = (
+        sum((shape - 1) * stride for shape, stride in zip(size, stride))
+        + 1
+        + extra_size
+    )
+    buffer = torch.randint(low=0, high=needed_size, size=size,  device='cuda:0', dtype=torch.int32)
+    return torch.as_strided(buffer, size, stride)
+
 for shape in shapes:
     S = shape
     base = rand_strided((2*S, ), (1, ), device='cuda:0', dtype=torch.int8)
     vec = rand_strided((S, ), (1, ), device='cuda:0', dtype=torch.bfloat16)
-    ts_0 = rand_strided((2*S, ), (1, ), device='cuda:0', dtype=torch.int32)
-    ts_1 = rand_strided((S, ), (1, ), device='cuda:0', dtype=torch.int32)
+    ts_0 = rand_strided_intrand((2*S, ), (1, ), device='cuda:0', dtype=torch.int32)
+    ts_1 = rand_strided_intrand((S, ), (1, ), device='cuda:0', dtype=torch.int32)
+    print("ts_0")
+    print(ts_0)
+    print(ts_0.size())
+    print("ts_1")
+    print(ts_1)
+    print(ts_1.size())
     triton_test_0(base, vec, ts_0, ts_1, benchmark=(os.environ.get("TRITON_GATHER_BENCHMARK") == "1" ))
 
 
