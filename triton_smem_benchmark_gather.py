@@ -29,52 +29,60 @@ reinterpret_tensor = torch.as_strided
     configs=[
         triton.Config(
             {
-                "XBLOCK": 1,
-                "RBLOCK": 2048,
+                "XBLOCK": 1024,
+                "RBLOCK": 2,
             },
             num_stages=1,
             num_warps=8,
         ),
-        triton.Config(
-            {
-                "XBLOCK": 64,
-                "RBLOCK": 8,
-            },
-            num_stages=1,
-            num_warps=8,
-        ),
-        triton.Config(
-            {
-                "XBLOCK": 64,
-                "RBLOCK": 4,
-            },
-            num_stages=1,
-            num_warps=8,
-        ),
-        triton.Config(
-            {
-                "XBLOCK": 8,
-                "RBLOCK": 512,
-            },
-            num_stages=1,
-            num_warps=8,
-        ),
-        triton.Config(
-            {
-                "XBLOCK": 8,
-                "RBLOCK": 256,
-            },
-            num_stages=1,
-            num_warps=8,
-        ),
-        triton.Config(
-            {
-                "XBLOCK": 64,
-                "RBLOCK": 64,
-            },
-            num_stages=1,
-            num_warps=8,
-        ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 1,
+        #         "RBLOCK": 2048,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 64,
+        #         "RBLOCK": 8,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 64,
+        #         "RBLOCK": 4,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 8,
+        #         "RBLOCK": 512,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 8,
+        #         "RBLOCK": 256,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 64,
+        #         "RBLOCK": 64,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
     ],
     key=["xnumel", "rnumel"],
 )
@@ -119,52 +127,60 @@ def triton_global_gather(base_ptr, vec_ptr, ts_0_ptrs, ts_1_ptrs, out_ptr1, xnum
     configs=[
         triton.Config(
             {
-                "XBLOCK": 1,
-                "RBLOCK": 2048,
+                "XBLOCK": 1024,
+                "RBLOCK": 2,
             },
             num_stages=1,
             num_warps=8,
         ),
-        triton.Config(
-            {
-                "XBLOCK": 64,
-                "RBLOCK": 8,
-            },
-            num_stages=1,
-            num_warps=8,
-        ),
-        triton.Config(
-            {
-                "XBLOCK": 64,
-                "RBLOCK": 4,
-            },
-            num_stages=1,
-            num_warps=8,
-        ),
-        triton.Config(
-            {
-                "XBLOCK": 8,
-                "RBLOCK": 512,
-            },
-            num_stages=1,
-            num_warps=8,
-        ),
-        triton.Config(
-            {
-                "XBLOCK": 8,
-                "RBLOCK": 256,
-            },
-            num_stages=1,
-            num_warps=8,
-        ),
-        triton.Config(
-            {
-                "XBLOCK": 64,
-                "RBLOCK": 64,
-            },
-            num_stages=1,
-            num_warps=8,
-        ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 1,
+        #         "RBLOCK": 2048,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 64,
+        #         "RBLOCK": 8,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 64,
+        #         "RBLOCK": 4,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 8,
+        #         "RBLOCK": 512,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 8,
+        #         "RBLOCK": 256,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
+        # triton.Config(
+        #     {
+        #         "XBLOCK": 64,
+        #         "RBLOCK": 64,
+        #     },
+        #     num_stages=1,
+        #     num_warps=8,
+        # ),
     ],
     key=["xnumel", "rnumel"],
 )
@@ -203,8 +219,8 @@ def triton_local_gather(base_ptr, vec_ptr, ts_0_ptrs, ts_1_ptrs, out_ptr1, xnume
 
             ### TRITON_SMEM, local_gather read from smem
             ### this is expected to produce ttg.local_gather(base_ptr_smem, ts)
-            tmp4 = tl.load(base_ptr_smem + ts) if use_smem else base_ptr_smem
-            # tmp4 = tl.reshape(tmp4, (1, 2048))
+            # tmp4 = tl.load(base_ptr_smem + ts) if use_smem else base_ptr_smem
+            tmp4 = tl.load(base_ptr_smem + ts)
 
             tmp5 = tmp4.to(tl.float32)
             tmp6 = tmp5.to(tl.float32)
@@ -217,8 +233,8 @@ def triton_local_gather(base_ptr, vec_ptr, ts_0_ptrs, ts_1_ptrs, out_ptr1, xnume
         tmp13 = tmp11.to(tl.float32)
         tl.store(out_ptr1 + (x0), tmp13, None)
 
-gpu_iters = 10000
-benchmark_iters = 2
+gpu_iters = 1000
+benchmark_iters = 10
 use_smem = os.environ.get("TRITON_LOCAL_GATHER_SMEM") == "1"
 
 def triton_gemv_0(base, vec, ts_0, ts_1, benchmark: bool = False):
@@ -275,6 +291,7 @@ def triton_gemv_0(base, vec, ts_0, ts_1, benchmark: bool = False):
         else:
             print(f"Running {'local' if is_local_gather else 'global'} gather for shape [{S}]")
             gather_kernel[grid](base, vec, ts_0, ts_1, buf1, xnumel, rnumel)
+            torch.cuda.synchronize()
 
 
     return (reinterpret_tensor(buf1, (2, S), (S, 1), 0), )
