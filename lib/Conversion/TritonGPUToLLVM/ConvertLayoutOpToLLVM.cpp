@@ -69,9 +69,11 @@ private:
 
     auto elemTy = typeConverter->convertType(dstTy.getElementType());
 
+    Value Indices = op.getIndices();
     SmallVector<Value> outVals =
-        gatherSharedToDistributed(op.getResult(), op.getSrc(), op.getIndices(),
-                                  smemObj, elemTy, loc, rewriter, targetInfo);
+        loadSharedToDistributed(op.getResult(), op.getSrc(),
+                                smemObj, elemTy, loc, rewriter, targetInfo,
+                                &Indices, true /* isLocalGather */);
 
     Value result = packLLElements(loc, typeConverter, outVals, rewriter, dstTy);
     rewriter.replaceOp(op, result);

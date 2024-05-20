@@ -1381,82 +1381,17 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs(
   return ret;
 }
 
-inline SmallVector<Value>
-gatherSharedToDistributed(Value dst, Value src, Value indices,
-                          SharedMemoryObject smemObj, Type elemTy, Location loc,
-                          ConversionPatternRewriter &rewriter,
-                          const TargetInfoBase &target) {
-  auto dstTy = cast<RankedTensorType>(dst.getType());
-  auto dstShape = dstTy.getShape();
-  assert(dstShape.size() <= 2 &&
-         "Unexpected rank of gatherSharedToDistributed");
-  auto srcTy = cast<MemDescType>(src.getType());
-  auto dstDistributedLayout = dstTy.getEncoding();
-
-  auto srcSharedLayout =
-      cast<triton::gpu::SharedEncodingAttr>(srcTy.getEncoding());
-  auto inOrd = triton::gpu::getOrder(srcSharedLayout);
-  auto outOrd = triton::gpu::getOrder(dstDistributedLayout);
-
-  // PL: What is this?
-  unsigned outVec = inOrd == outOrd
-                        ? triton::gpu::getUniqueContigPerThread(
-                              dstDistributedLayout, dstShape)[outOrd[0]]
-                        : 1;
-
-  unsigned inVec = srcSharedLayout.getMaxPhase() == 1
-                       ? srcTy.getShape()[inOrd[0]]
-                       : srcSharedLayout.getVec();
-
-  unsigned minVec = std::min(outVec, inVec);
-  unsigned outElems = triton::gpu::getTotalElemsPerThread(dstTy);
-  SmallVector<Value> offsetVals = {smemObj.strides.size(), i32_val(0)};
-
-  // if (auto ptrTensorType = dyn_cast<RankedTensorType>(indices.getType())) {
-  //   llvm::errs() << "Tensor Indices Type: ";
-  //   ptrTensorType.dump();
-  //   auto shape = ptrTensorType.getShape();
-  //   llvm::errs() << "TENSOR OF INDICES SHAPE RANK: " << shape.size() << "\n";
-  //   llvm::errs() << "TENSOR OF INDICES: ";
-  //   indices.getAsOpaquePointer();
-  //   indices.dump();
-  // }
-
-  DenseMap<unsigned, Value> sharedPtrs =
-      getSwizzledSharedPtrs(loc, target, outVec, dstTy, srcSharedLayout, elemTy,
-                            smemObj, rewriter, offsetVals, smemObj.strides);
-
-  assert(outElems % minVec == 0 && "Unexpected number of elements");
-  unsigned numVecs = outElems / minVec;
-  auto wordTy = vec_ty(elemTy, minVec);
-  SmallVector<Value> outVals(outElems);
-  for (unsigned i = 0; i < numVecs; ++i) {
-    auto next = i;
-
-    // Hack to reduce number of SAS LDS instructions:
-    // if (i == numVecs - 1)
-    //   next = i - 1;
-
-    Value smemAddr = sharedPtrs[next * minVec];
-    smemAddr = bitcast(smemAddr, ptr_ty(rewriter.getContext(), 3));
-    auto valVec = load(wordTy, smemAddr);
-    valVec.setAlignment(minVec * elemTy.getIntOrFloatBitWidth() / 8);
-    for (unsigned v = 0; v < minVec; ++v) {
-      Value currVal = extract_element(elemTy, valVec, i32_val(v));
-      outVals[i * minVec + v] = currVal;
-    }
-  }
-  return outVals;
-}
-
 inline SmallVector<Value> loadSharedToDistributed(
     Value dst, Value src, SharedMemoryObject smemObj, Type elemTy, Location loc,
-    ConversionPatternRewriter &rewriter, const TargetInfoBase &target) {
+    ConversionPatternRewriter &rewriter, const TargetInfoBase &target,
+    Value *indices = nullptr, bool isLocalGather = false
+    ) {
   auto dstTy = cast<RankedTensorType>(dst.getType());
   auto dstShape = dstTy.getShape();
   assert(dstShape.size() <= 2 && "Unexpected rank of loadSharedToDistributed");
   auto srcTy = cast<MemDescType>(src.getType());
   auto dstDistributedLayout = dstTy.getEncoding();
+  if (!isLocalGather)
   if (auto mmaLayout = dyn_cast<NvidiaMmaEncodingAttr>(dstDistributedLayout)) {
     assert((!mmaLayout.isVolta()) &&
            "ConvertLayout Shared->MMAv1 is not supported yet");
@@ -1484,6 +1419,17 @@ inline SmallVector<Value> loadSharedToDistributed(
   unsigned outElems = triton::gpu::getTotalElemsPerThread(dstTy);
   SmallVector<Value> offsetVals = {smemObj.strides.size(), i32_val(0)};
 
+  // if (auto ptrTensorType = dyn_cast<RankedTensorType>(indices.getType())) {
+  //   llvm::errs() << "Tensor Indices Type: ";
+  //   ptrTensorType.dump();
+  //   auto shape = ptrTensorType.getShape();
+  //   llvm::errs() << "TENSOR OF INDICES SHAPE RANK: " << shape.size() << "\n";
+  //   llvm::errs() << "TENSOR OF INDICES: ";
+  //   indices.getAsOpaquePointer();
+  //   indices.dump();
+  // }
+
+
   DenseMap<unsigned, Value> sharedPtrs =
       getSwizzledSharedPtrs(loc, target, outVec, dstTy, srcSharedLayout, elemTy,
                             smemObj, rewriter, offsetVals, smemObj.strides);
@@ -1492,7 +1438,13 @@ inline SmallVector<Value> loadSharedToDistributed(
   auto wordTy = vec_ty(elemTy, minVec);
   SmallVector<Value> outVals(outElems);
   for (unsigned i = 0; i < numVecs; ++i) {
-    Value smemAddr = sharedPtrs[i * minVec];
+    auto next = i;
+
+    // Hack to reduce number of SAS LDS instructions:
+    // if (i == numVecs - 1)
+    //   next = i - 1;
+
+    Value smemAddr = sharedPtrs[next * minVec];
     smemAddr = bitcast(smemAddr, ptr_ty(rewriter.getContext(), 3));
     auto valVec = load(wordTy, smemAddr);
     valVec.setAlignment(minVec * elemTy.getIntOrFloatBitWidth() / 8);
