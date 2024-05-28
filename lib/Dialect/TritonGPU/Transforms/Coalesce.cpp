@@ -204,6 +204,8 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
   void expandLocalLoads() {
     ModuleOp moduleOp = getOperation();
 
+    static unsigned loadCount = 0;
+
     // For each i/o operation, we determine what layout
     // the pointers should have for best memory coalescing
     std::stack<Operation *> eraser;
@@ -211,6 +213,17 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
       auto loadOp = dyn_cast<triton::LoadOp>(op);
       if (!loadOp)
         return;
+
+      if (loadCount == 8) {
+        llvm::errs() << "last load before crash!\n";
+      }
+
+      llvm::errs() << "FOUND LOAD " << loadCount++ << ": ";
+      loadOp->dump();
+
+      if (loadCount != 9) {
+        return;
+      }
 
       if (!op->getNumOperands() || !op->getOperand(0).getDefiningOp())
         return;
@@ -236,10 +249,22 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
         if (broadcast)
           hasBroadcast = true;
 
+        mlir::triton::SplatOp earlySplat =
+          broadcast ?
+          dyn_cast<mlir::triton::SplatOp>(broadcast->getOperand(0).getDefiningOp()) :
+          dyn_cast<mlir::triton::SplatOp>(addOp->getOperand(0).getDefiningOp());
+
+
         arith::ExtSIOp ext = broadcast
                                  ? dyn_cast<arith::ExtSIOp>(
                                        broadcast->getOperand(0).getDefiningOp())
                                  : dyn_cast<arith::ExtSIOp>(
+                                       addOp->getOperand(0).getDefiningOp());
+
+        arith::ExtFOp extf = broadcast
+                                 ? dyn_cast<arith::ExtFOp>(
+                                       broadcast->getOperand(0).getDefiningOp())
+                                 : dyn_cast<arith::ExtFOp>(
                                        addOp->getOperand(0).getDefiningOp());
 
         if (auto splat = dyn_cast<mlir::triton::SplatOp>(
@@ -250,16 +275,33 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
         }
 
         offset = offset ? offset : addOp->getOperand(1);
+
+        if (auto offsetFP = dyn_cast<arith::SIToFPOp>(offset.getDefiningOp())) {
+          offset = offsetFP.getOperand();
+        }
+
         prefetchLoad =
+            extf ? dyn_cast<triton::LoadOp>(extf.getOperand().getDefiningOp()->
+                getOperands()[0].getDefiningOp()->
+                getOperands()[0].getDefiningOp()->getOperands()[0].getDefiningOp()) : (
             ext ? dyn_cast<triton::LoadOp>(ext.getOperand().getDefiningOp())
                 : dyn_cast<triton::LoadOp>(
-                      addOp->getOperand(0).getDefiningOp());
+                      addOp->getOperand(0).getDefiningOp()));
+        prefetchLoad = dyn_cast<triton::LoadOp>(
+            addOp->
+            getOperands()[0].getDefiningOp()->
+            getOperands()[0].getDefiningOp()->
+            getOperands()[0].getDefiningOp()->
+            getOperands()[0].getDefiningOp());
         tailAllocOp = broadcast ? broadcast : (ext ? ext : prefetchLoad);
+        tailAllocOp = earlySplat ? earlySplat : tailAllocOp;
         resultType = tailAllocOp->getResult(0).getType();
       }
 
       if (!prefetchLoad || !offset)
         return;
+
+      llvm::errs() << "FOUND PRE-LOAD!!\n";
 
       OpBuilder builder(op);
       OpBuilder builder_prefetch(prefetchLoad);
@@ -356,7 +398,7 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
 #if LOCAL_GATHER
       auto localGather = builder.create<triton::gpu::LocalGatherOp>(
           loadOp.getLoc(), localGatherShape,
-          localAllocOp, offset);
+          localAllocOp.getResult(), offset);
       nextOp = localGather;
 #else
       llvm::SmallVector<Value, 2> offsetsVal = {

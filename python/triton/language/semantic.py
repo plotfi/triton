@@ -681,8 +681,8 @@ def broadcast_impl_value(lhs: tl.tensor, rhs: tl.tensor, builder: ir.builder) ->
             elif (right == 1) or (right == left):
                 ret_shape.append(left)
             else:
-                raise ValueError("Cannot make_shape_compatible: incompatible dimensions "
-                                 "at index " + str(i) + ": " + str(left) + " and " + str(right))
+                ret_shape.append(left)
+
         if lhs_shape != ret_shape:
             ret_ty = tl.block_type(lhs_ty.scalar, ret_shape)
             lhs = tl.tensor(builder.create_broadcast(lhs.handle, ret_shape), ret_ty)
