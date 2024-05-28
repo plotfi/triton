@@ -2,14 +2,22 @@
 #include <numeric>
 
 #include "mlir/Analysis/SliceAnalysis.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LLVM.h"
 #include "triton/Analysis/AxisInfo.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #include "triton/Tools/StrUtil.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
+#include <iterator>
+#include <numeric>
+#include <stack>
 
 #define DEBUG_TYPE "tritongpu-coalesce"
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
@@ -154,6 +162,8 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
   }
 
   void runOnOperation() override {
+    expandLocalLoads();
+
     // Run axis info analysis
     ModuleOp moduleOp = getOperation();
     ModuleAxisInfoAnalysis axisInfoAnalysis(moduleOp);
@@ -188,6 +198,239 @@ struct CoalescePass : public TritonGPUCoalesceBase<CoalescePass> {
     // 5. Replace all the uses of the original memory op by the new one
     for (auto &kv : layoutMap) {
       coalesceOp(kv.second, kv.first);
+    }
+  }
+
+  void expandLocalLoads() {
+    ModuleOp moduleOp = getOperation();
+
+    static unsigned loadCount = 0;
+
+    // For each i/o operation, we determine what layout
+    // the pointers should have for best memory coalescing
+    std::stack<Operation *> eraser;
+    moduleOp.walk([&](Operation *op) {
+      auto loadOp = dyn_cast<triton::LoadOp>(op);
+      if (!loadOp)
+        return;
+
+      if (loadCount == 8) {
+        llvm::errs() << "last load before crash!\n";
+      }
+
+      llvm::errs() << "FOUND LOAD " << loadCount++ << ": ";
+      loadOp->dump();
+
+      if (loadCount != 9) {
+        return;
+      }
+
+      if (!op->getNumOperands() || !op->getOperand(0).getDefiningOp())
+        return;
+
+      auto ptr = op->getOperand(0);
+      auto prefetchLoad = dyn_cast<triton::LoadOp>(ptr.getDefiningOp());
+
+      Value offset = nullptr;
+
+      // Handle the base + offset case
+      auto addIOp = dyn_cast<mlir::arith::AddIOp>(ptr.getDefiningOp());
+      auto addFOp = dyn_cast<mlir::arith::AddFOp>(ptr.getDefiningOp());
+      Type resultType;
+      Operation *tailAllocOp = nullptr;
+      Operation *addOp = addIOp ? addIOp : addFOp;
+      bool hasBroadcast = false;
+
+      // Handle the base + offset case
+      if (!prefetchLoad && addOp) {
+
+        triton::BroadcastOp broadcast =
+            dyn_cast<triton::BroadcastOp>(addOp->getOperand(0).getDefiningOp());
+        if (broadcast)
+          hasBroadcast = true;
+
+        mlir::triton::SplatOp earlySplat =
+          broadcast ?
+          dyn_cast<mlir::triton::SplatOp>(broadcast->getOperand(0).getDefiningOp()) :
+          dyn_cast<mlir::triton::SplatOp>(addOp->getOperand(0).getDefiningOp());
+
+
+        arith::ExtSIOp ext = broadcast
+                                 ? dyn_cast<arith::ExtSIOp>(
+                                       broadcast->getOperand(0).getDefiningOp())
+                                 : dyn_cast<arith::ExtSIOp>(
+                                       addOp->getOperand(0).getDefiningOp());
+
+        arith::ExtFOp extf = broadcast
+                                 ? dyn_cast<arith::ExtFOp>(
+                                       broadcast->getOperand(0).getDefiningOp())
+                                 : dyn_cast<arith::ExtFOp>(
+                                       addOp->getOperand(0).getDefiningOp());
+
+        if (auto splat = dyn_cast<mlir::triton::SplatOp>(
+                addOp->getOperand(1).getDefiningOp())) {
+          auto sitofp =
+              dyn_cast<arith::SIToFPOp>(splat.getOperand().getDefiningOp());
+          offset = sitofp ? sitofp.getOperand() : nullptr;
+        }
+
+        offset = offset ? offset : addOp->getOperand(1);
+
+        if (auto offsetFP = dyn_cast<arith::SIToFPOp>(offset.getDefiningOp())) {
+          offset = offsetFP.getOperand();
+        }
+
+        prefetchLoad =
+            extf ? dyn_cast<triton::LoadOp>(extf.getOperand().getDefiningOp()->
+                getOperands()[0].getDefiningOp()->
+                getOperands()[0].getDefiningOp()->getOperands()[0].getDefiningOp()) : (
+            ext ? dyn_cast<triton::LoadOp>(ext.getOperand().getDefiningOp())
+                : dyn_cast<triton::LoadOp>(
+                      addOp->getOperand(0).getDefiningOp()));
+        prefetchLoad = dyn_cast<triton::LoadOp>(
+            addOp->
+            getOperands()[0].getDefiningOp()->
+            getOperands()[0].getDefiningOp()->
+            getOperands()[0].getDefiningOp()->
+            getOperands()[0].getDefiningOp());
+        tailAllocOp = broadcast ? broadcast : (ext ? ext : prefetchLoad);
+        tailAllocOp = earlySplat ? earlySplat : tailAllocOp;
+        resultType = tailAllocOp->getResult(0).getType();
+      }
+
+      if (!prefetchLoad || !offset)
+        return;
+
+      llvm::errs() << "FOUND PRE-LOAD!!\n";
+
+      OpBuilder builder(op);
+      OpBuilder builder_prefetch(prefetchLoad);
+
+      int numWarps = triton::gpu::TritonGPUDialect::getNumWarps(moduleOp);
+      int numCTAs = triton::gpu::TritonGPUDialect::getNumCTAs(moduleOp);
+      int threadsPerWarp =
+          triton::gpu::TritonGPUDialect::getThreadsPerWarp(moduleOp);
+
+      auto prefetchLoadTensorType = mlir::dyn_cast<RankedTensorType>(
+          prefetchLoad->getResult(0).getType());
+      auto tensorType = mlir::dyn_cast<RankedTensorType>(resultType);
+      auto elementType = tensorType.getElementType();
+
+      auto prefetchLoadBlocked =
+          mlir::dyn_cast<triton::gpu::BlockedEncodingAttr>(
+              prefetchLoadTensorType.getEncoding());
+      auto srcBlocked = mlir::dyn_cast<triton::gpu::BlockedEncodingAttr>(
+          tensorType.getEncoding());
+      auto oldOrder = mlir::triton::gpu::getOrder(srcBlocked);
+      auto oldShape = tensorType.getShape();
+
+#define LOCAL_GATHER 1
+#define RESHAPE !LOCAL_GATHER
+
+#if LOCAL_GATHER
+      unsigned newOrderDim1 = 0;
+      int64_t newShapeDim1 = oldShape[1];
+      std::vector<int64_t> newShape = {newShapeDim1, oldShape[0]};
+      auto tensorRank = tensorType.getRank();
+      std::vector<unsigned> newOrder = {newOrderDim1, oldOrder[0]};
+      auto blockedOrder = oldOrder;
+      auto sharedMemoryOrder = newOrder;
+      auto sharedMemoryShape = newShape;
+#else
+      unsigned newOrderDim1 = 1;
+      int64_t newShapeDim1 = oldShape.size() < 2 ? 1 : oldShape[1];
+      std::vector<int64_t> newShape = {newShapeDim1, oldShape[0]};
+      auto tensorRank = tensorType.getRank() + 1;
+      std::vector<unsigned> newOrder = {newOrderDim1, oldOrder[0]};
+      auto blockedOrder = newOrder;
+      auto sharedMemoryOrder = newOrder;
+      auto sharedMemoryShape = newShape;
+#endif
+
+      SmallVector<unsigned, 4> sizePerThread(tensorRank, 1);
+      auto sharedBlockedLayout = triton::gpu::BlockedEncodingAttr::get(
+          tensorType.getContext(), sharedMemoryShape, sizePerThread,
+          blockedOrder, numWarps, threadsPerWarp, numCTAs);
+
+      if (hasBroadcast) {
+        auto a = sharedMemoryShape[0];
+        sharedMemoryShape[0] = sharedMemoryShape[1];
+        sharedMemoryShape[1] = a;
+      }
+
+      auto newLayout = mlir::triton::gpu::SharedEncodingAttr::get(
+          tensorType.getContext(), sharedMemoryShape, sharedMemoryOrder,
+          sharedBlockedLayout.getCTALayout(), elementType);
+
+      auto memDescType =
+          triton::MemDescType::get(sharedMemoryShape, elementType, newLayout);
+
+      Operation *nextOp = tailAllocOp;
+
+#if RESHAPE
+      auto reshapeOp = builder.create<triton::ReshapeOp>(
+          prefetchLoad.getLoc(),
+          RankedTensorType::get(sharedMemoryShape, elementType,
+                                sharedBlockedLayout),
+          nextOp->getResults()[0], false /* allowReorder */);
+      reshapeOp.getOperation()->moveAfter(nextOp);
+      nextOp = reshapeOp;
+
+      auto localGatherShape =
+        RankedTensorType::get(memDescType.getShape(),
+                              memDescType.getElementType(),
+                              sharedBlockedLayout);
+#else
+      auto localGatherShape = tensorType;
+#endif
+
+      auto localAllocOp = builder_prefetch.create<triton::gpu::LocalAllocOp>(
+          prefetchLoad.getLoc(), memDescType, nextOp->getResults()[0]);
+      localAllocOp.getOperation()->moveAfter(nextOp);
+
+#if !RESHAPE
+      nextOp = localAllocOp;
+#endif
+      tailAllocOp->getResult(0).replaceAllUsesExcept(localAllocOp, nextOp);
+
+      localAllocOp->getParentOp()->dump();
+
+#if LOCAL_GATHER
+      auto localGather = builder.create<triton::gpu::LocalGatherOp>(
+          loadOp.getLoc(), localGatherShape,
+          localAllocOp.getResult(), offset);
+      nextOp = localGather;
+#else
+      llvm::SmallVector<Value, 2> offsetsVal = {
+          builder.create<arith::ConstantIntOp>(loadOp.getLoc(), 0, 32), offset};
+      auto memDescSubview = builder.create<triton::gpu::MemDescSubviewOp>(
+          loadOp.getLoc(), memDescType, localAllocOp, offsetsVal);
+
+      auto localLoadOp = builder.create<triton::gpu::LocalLoadOp>(
+          loadOp.getLoc(),
+          RankedTensorType::get(memDescType.getShape(),
+                                memDescType.getElementType(),
+                                sharedBlockedLayout),
+          memDescSubview);
+      nextOp = localLoadOp;
+#endif
+
+      auto reshapeOpOut = builder.create<triton::ReshapeOp>(
+          loadOp.getLoc(),
+          RankedTensorType::get(oldShape, elementType, srcBlocked),
+          nextOp->getResults()[0], false /* allowReorder */);
+      nextOp = reshapeOpOut;
+
+      op->getResult(0).replaceAllUsesWith(nextOp->getResults()[0]);
+      // Erase the original operation
+      eraser.push(addOp);
+      eraser.push(op);
+    });
+
+    while (!eraser.empty()) {
+      auto op = eraser.top();
+      eraser.pop();
+      op->erase();
     }
   }
 };

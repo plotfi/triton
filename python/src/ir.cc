@@ -1581,6 +1581,24 @@ void init_triton_ir(py::module &&m) {
              }
            })
       .def("run", [](PassManager &self, ModuleOp &mod) {
+
+
+             auto *context = self.getContext();
+             bool haveDiagnostics =
+                 ::triton::tools::getBoolEnv("MLIR_ENABLE_DIAGNOSTICS");
+             bool haveDump = ::triton::tools::getBoolEnv("MLIR_ENABLE_DUMP");
+             if (haveDiagnostics || haveDump) {
+               context->disableMultithreading();
+             }
+             if (haveDiagnostics) {
+               context->printOpOnDiagnostic(true);
+               context->printStackTraceOnDiagnostic(true);
+               context->getDiagEngine().registerHandler([](Diagnostic &diag) {
+                 llvm::outs() << diag << "\n";
+                 return success();
+               });
+             }
+
         // TODO: maybe dump module to file and print error for better
         // diagnostics
         auto reproducerPath =

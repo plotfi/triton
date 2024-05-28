@@ -681,8 +681,8 @@ def broadcast_impl_value(lhs: tl.tensor, rhs: tl.tensor, builder: ir.builder) ->
             elif (right == 1) or (right == left):
                 ret_shape.append(left)
             else:
-                raise ValueError("Cannot make_shape_compatible: incompatible dimensions "
-                                 "at index " + str(i) + ": " + str(left) + " and " + str(right))
+                ret_shape.append(left)
+
         if lhs_shape != ret_shape:
             ret_ty = tl.block_type(lhs_ty.scalar, ret_shape)
             lhs = tl.tensor(builder.create_broadcast(lhs.handle, ret_shape), ret_ty)
@@ -965,8 +965,8 @@ def _load_block_pointer(ptr, mask, other, boundary_check, padding, cache, evicti
 
 def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile, builder):
     # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
-    if not ptr.type.scalar.is_ptr():
-        raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
+    # if not ptr.type.scalar.is_ptr() and ptr.shared_ptr_ty is None:
+    #     raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
 
     # Check `mask`, `other`, `boundary_check`, and `padding` arguments
     if mask is None and other is not None:
@@ -992,7 +992,9 @@ def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_
 
     # Get `pointer_type<elt_ty>` and `elt_ty`
     ptr_ty = ptr.type.scalar
-    elt_ty = ptr_ty.element_ty
+    elt_ty = ptr_ty
+    if  hasattr(ptr_ty, "element_ty"):
+        elt_ty = ptr_ty.element_ty
 
     # Treat `pointer_type<tl.int1>` as `pointer_type<tl.int8>`
     if elt_ty == tl.int1:
