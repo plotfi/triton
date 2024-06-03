@@ -1431,7 +1431,9 @@ inline SmallVector<Value>
 loadSharedToDistributed(RankedTensorType dstTy, MemDescType srcTy,
                         Type elemLlvmTy, SharedMemoryObject smemObj,
                         Location loc, RewriterBase &rewriter,
-                        const TargetInfoBase &target, bool allowLLs = true) {
+                        const TargetInfoBase &target, bool allowLLs = true,
+                        SmallVector<Value> localGatherIndices = {},
+                        SmallVector<Value> localGatherMask = {}) {
   if (allowLLs) {
     std::optional<SmallVector<Value>> llVals =
         loadSharedToRegistersUsingLinearLayouts(dstTy, srcTy, elemLlvmTy,
@@ -1470,6 +1472,38 @@ loadSharedToDistributed(RankedTensorType dstTy, MemDescType srcTy,
   unsigned minVec = std::min(outVec, inVec);
   unsigned outElems = triton::gpu::getTotalElemsPerThread(dstTy);
   SmallVector<Value> offsetVals = {smemObj.strides.size(), i32_val(0)};
+
+  if (localGatherIndices.size()) {
+    auto wordTy = vec_ty(elemLlvmTy, minVec);
+    SmallVector<Value> outVals(outElems);
+    auto width = elemLlvmTy.getIntOrFloatBitWidth();
+    auto byteWidth = width / 8;
+    for (unsigned i = 0; i < localGatherIndices.size(); ++i) {
+      auto dstPtrTy = ptr_ty(rewriter.getContext(), 3);
+      auto dstOffset = localGatherIndices[i];
+      Value smemAddr = gep(dstPtrTy, elemLlvmTy, smemObj.base, dstOffset);
+      smemAddr = bitcast(smemAddr, ptr_ty(rewriter.getContext(), 3));
+      auto valVec = load(wordTy, smemAddr);
+      valVec.setAlignment(minVec * elemLlvmTy.getIntOrFloatBitWidth() / 8);
+
+      if (localGatherMask.size()) {
+        Value currVal = extract_element(elemLlvmTy, valVec, i32_val(0));
+        auto defaultVal =
+          rewriter.create<LLVM::ConstantOp>(loc, elemLlvmTy,
+                                            rewriter.getZeroAttr(elemLlvmTy));
+
+        auto selectOp = select(localGatherMask[i], currVal, defaultVal);
+        outVals[i] = selectOp;
+        continue;
+      }
+
+      for (unsigned v = 0; v < minVec; ++v) {
+        Value currVal = extract_element(elemLlvmTy, valVec, i32_val(v));
+        outVals[i * minVec + v] = currVal;
+      }
+    }
+    return outVals;
+  }
 
   DenseMap<unsigned, Value> sharedPtrs = getSwizzledSharedPtrs(
       loc, target, outVec, dstTy, srcSharedLayout, elemLlvmTy, smemObj,

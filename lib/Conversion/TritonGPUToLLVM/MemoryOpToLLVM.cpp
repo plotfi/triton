@@ -20,7 +20,8 @@ void lowerDistributedToShared(Location loc, Value src, Value dst,
                               const SharedMemoryObject &smemObj,
                               const LLVMTypeConverter *typeConverter,
                               ConversionPatternRewriter &rewriter,
-                              const TargetInfoBase &targetInfo) {
+                              const TargetInfoBase &targetInfo,
+                              bool allowLLs = true) {
   auto srcTy = cast<RankedTensorType>(src.getType());
   auto dstTy = cast<MemDescType>(dst.getType());
   auto outOrd = mlir::cast<SharedEncodingAttr>(dstTy.getEncoding()).getOrder();
@@ -33,7 +34,7 @@ void lowerDistributedToShared(Location loc, Value src, Value dst,
   auto dstStrides = smemObj.getStrides();
   auto inVals = unpackLLElements(loc, adaptorSrc, rewriter);
   storeDistributedToShared(dstTy, srcTy, elemTy, inVals, smemBase, dstStrides,
-                           loc, rewriter, targetInfo);
+                           loc, rewriter, targetInfo, allowLLs);
 }
 
 struct LocalAllocOpConversion
@@ -77,7 +78,7 @@ struct LocalAllocOpConversion
     if (op.getSrc()) {
       lowerDistributedToShared(loc, op.getSrc(), op.getResult(),
                                adaptor.getSrc(), smemObj, typeConverter,
-                               rewriter, targetInfo);
+                               rewriter, targetInfo, false);
     }
     auto retVal = getStructFromSharedMemoryObject(loc, smemObj, rewriter);
     rewriter.replaceOp(op, retVal);
