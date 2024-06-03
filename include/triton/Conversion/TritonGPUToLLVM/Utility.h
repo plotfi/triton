@@ -18,6 +18,7 @@
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 
 #define DEBUG_TYPE "ttgpu_to_llvm"
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
@@ -1375,7 +1376,9 @@ inline DenseMap<unsigned, Value> getSwizzledSharedPtrs(
 
 inline SmallVector<Value> loadSharedToDistributed(
     Value dst, Value src, SharedMemoryObject smemObj, Type elemTy, Location loc,
-    ConversionPatternRewriter &rewriter, const TargetInfoBase &target) {
+    ConversionPatternRewriter &rewriter, const TargetInfoBase &target,
+    SmallVector<Value> localGatherIndices = {},
+    SmallVector<Value> localGatherMask = {}) {
   auto dstTy = cast<RankedTensorType>(dst.getType());
   auto dstShape = dstTy.getShape();
   assert(dstShape.size() <= 2 && "Unexpected rank of loadSharedToDistributed");
@@ -1407,6 +1410,34 @@ inline SmallVector<Value> loadSharedToDistributed(
   unsigned minVec = std::min(outVec, inVec);
   unsigned outElems = triton::gpu::getTotalElemsPerThread(dstTy);
   SmallVector<Value> offsetVals = {smemObj.strides.size(), i32_val(0)};
+
+  if (localGatherIndices.size()) {
+    auto wordTy = vec_ty(elemTy, minVec);
+    SmallVector<Value> outVals(outElems);
+    auto width = elemTy.getIntOrFloatBitWidth();
+    auto byteWidth = width / 8;
+    for (unsigned i = 0; i < localGatherIndices.size(); ++i) {
+      auto dstPtrTy = ptr_ty(rewriter.getContext(), 3);
+      auto dstOffset = localGatherIndices[i];
+      Value smemAddr = gep(dstPtrTy, elemTy, smemObj.base, dstOffset);
+      smemAddr = bitcast(smemAddr, ptr_ty(rewriter.getContext(), 3));
+      auto valVec = load(wordTy, smemAddr);
+      valVec.setAlignment(minVec * elemTy.getIntOrFloatBitWidth() / 8);
+
+      if (localGatherMask.size()) {
+        Value currVal = extract_element(elemTy, valVec, i32_val(0));
+        auto selectOp = select(localGatherMask[i], currVal, int_val(width, 0));
+        outVals[i] = selectOp;
+        continue;
+      }
+
+      for (unsigned v = 0; v < minVec; ++v) {
+        Value currVal = extract_element(elemTy, valVec, i32_val(v));
+        outVals[i * minVec + v] = currVal;
+      }
+    }
+    return outVals;
+  }
 
   DenseMap<unsigned, Value> sharedPtrs =
       getSwizzledSharedPtrs(loc, target, outVec, dstTy, srcSharedLayout, elemTy,
