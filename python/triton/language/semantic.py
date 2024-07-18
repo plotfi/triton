@@ -823,6 +823,7 @@ def cast(input: tl.tensor, dst_ty: tl.dtype, builder: ir.builder,
         if src_sca_ty.is_bool() or not src_sca_ty.is_int_signed():
             return tl.tensor(builder.create_ui_to_fp(input.handle, dst_ty.to_ir(builder)), dst_ty)
         else:
+            print(f"dst tyyy: {dst_ty}")
             return tl.tensor(builder.create_si_to_fp(input.handle, dst_ty.to_ir(builder)), dst_ty)
 
     # Casting pointer types to integer types
@@ -1023,6 +1024,51 @@ def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_
             builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None, cache, eviction,
                                        is_volatile), dst_ty)
 
+def local_copy(ptr: tl.tensor, builder: ir.builder) -> tl.tensor:
+    # Get `pointer_type<elt_ty>` and `elt_ty`
+    ptr_ty = ptr.type.scalar
+    elt_ty = ptr_ty # .element_ty
+    dst_ty = elt_ty
+    return tl.tensor(builder.create_local_copy(ptr.handle), tl.pointer_type(dst_ty, 3))
+
+def gather(ptr,
+           indices: tl.tensor,
+           mask: Optional[tl.tensor], other: Optional[tl.tensor],
+           builder: ir.builder) -> tl.tensor:
+    # Get `pointer_type<elt_ty>` and `elt_ty`
+    ptr_ty = ptr.type.scalar
+    elt_ty = ptr_ty # .element_ty
+    dst_ty = elt_ty
+
+    # Get `pointer_type<elt_ty>` and `elt_ty`
+    ptr_ty = ptr.type.scalar
+    elt_ty = ptr_ty.element_ty
+
+    # Treat `pointer_type<tl.int1>` as `pointer_type<tl.int8>`
+    if elt_ty == tl.int1:
+        elt_ty = tl.int8
+        ptr_ty = tl.pointer_type(elt_ty, ptr_ty.address_space)
+        ptr = cast(ptr, ptr_ty, builder)
+
+    # Cast `other` into `ele_ty` type
+    if other is not None:
+        other = cast(other, elt_ty, builder)
+
+    # Create loaded result type `dst_ty`
+    if ptr.type.is_block():
+        shape = ptr.type.get_block_shapes()
+        dst_ty = tl.block_type(elt_ty, shape)
+    else:
+        # Load by de-referencing the pointer of scalar
+        dst_ty = elt_ty
+
+
+    return tl.tensor(
+        builder.create_masked_local_gather(ptr.handle,
+                                           indices.handle,
+                                           mask.handle if mask else None,
+                                           other.handle if other else None),
+        dst_ty)
 
 def load(ptr: tl.tensor, mask: Optional[tl.tensor], other: Optional[tl.tensor], boundary_check: Tuple,
          padding_option: str, cache_modifier: str, eviction_policy: str, is_volatile: bool,

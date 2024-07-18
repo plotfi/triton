@@ -1567,6 +1567,20 @@ def dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_i
 
 
 @builtin
+def local_copy(pointer,  _builder=None):
+    return semantic.local_copy(pointer, _builder)
+
+@builtin
+def gather(pointer, indices, mask=None, other=None, _builder=None):
+    mask = _constexpr_to_value(mask)
+    other = _constexpr_to_value(other)
+    if mask is not None:
+        mask = _to_tensor(mask, _builder)
+    if other is not None:
+        other = _to_tensor(other, _builder)
+    return semantic.gather(pointer, indices, mask, other, _builder)
+
+@builtin
 def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", cache_modifier="", eviction_policy="",
          volatile=False, _builder=None):
     """

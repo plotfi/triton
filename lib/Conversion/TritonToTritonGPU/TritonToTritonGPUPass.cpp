@@ -523,6 +523,34 @@ public:
   }
 };
 
+class TritonLocalCopyOpPattern : public OpConversionPattern<triton::LocalCopyOp> {
+public:
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::LocalCopyOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto converter = getTypeConverter();
+    llvm::errs() << "FOUND LOCAL COPY OP!!!\n";
+
+    return success();
+  }
+};
+
+class TritonGatherOpPattern : public OpConversionPattern<triton::GatherOp> {
+public:
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::GatherOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto converter = getTypeConverter();
+    llvm::errs() << "FOUND GATHER OP!!!\n";
+
+    return success();
+  }
+};
+
 void populateTritonPatterns(TritonGPUTypeConverter &typeConverter,
                             RewritePatternSet &patterns, unsigned numCTAs) {
   MLIRContext *context = patterns.getContext();
@@ -551,8 +579,10 @@ void populateTritonPatterns(TritonGPUTypeConverter &typeConverter,
       GenericOpPattern<triton::AtomicRMWOp>, GenericOpPattern<ReturnOp>,
       GenericOpPattern<triton::ExperimentalDescriptorLoadOp>,
       GenericOpPattern<triton::ExperimentalDescriptorStoreOp>,
-      GenericOpPattern<triton::CallOp>, TritonFuncOpPattern>(typeConverter,
-                                                             context);
+      GenericOpPattern<triton::CallOp>, TritonFuncOpPattern,
+      TritonLocalCopyOpPattern,
+      TritonGatherOpPattern
+  >(typeConverter, context);
 }
 
 //

@@ -1,4 +1,4 @@
-﻿#include <pybind11/functional.h>
+#include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -1222,6 +1222,58 @@ void init_triton_ir(py::module &&m) {
               EvictionPolicy evictionPolicy, bool isVolatile) -> Value {
              return self.create<LoadOp>(ptrs, cacheModifier, evictionPolicy,
                                         isVolatile);
+           })
+      .def("create_local_copy",
+           [](TritonOpBuilder &self, Value &ptr) -> Value {
+             auto context = ptr.getContext();
+             auto tensorType = dyn_cast<RankedTensorType>(ptr.getType());
+             auto elemType = tensorType.getElementType();
+             auto shape = tensorType.getShape();
+             auto rank = tensorType.getRank();
+             auto op = cast<LoadOp>(ptr.getDefiningOp());
+
+             // TODO: Set these with something other tha the defaults
+             auto ctaLayout = triton::gpu::CTALayoutAttr::getDefault(context, rank);
+             SmallVector<unsigned int> order = {0, 1};
+             //triton::gpu::getOrder(tensorType.getEncoding());
+
+             Attribute encoding =
+                 triton::gpu::SharedEncodingAttr::get(context, 1, 1, 1,
+                                                      order,
+                                                      ctaLayout);
+
+             if (tensorType.getRank() > 1) {
+               encoding = triton::gpu::SharedEncodingAttr::get(
+                   tensorType.getContext(), tensorType.getShape(), order,
+                   ctaLayout,
+                   tensorType.getElementType());
+             }
+
+             auto sharedMemorySpace =
+                 triton::gpu::SharedMemorySpaceAttr::get(context);
+
+             MemDescType memDescType =
+                 MemDescType::get(shape, elemType, encoding, sharedMemorySpace,
+                                  /*mutableMemory=*/ false);
+
+             return self.create<LocalCopyOp>(memDescType, ptr);
+           })
+
+      // .def("create_local_gather",
+      //      [](TritonOpBuilder &self, Value &ptr, Value &indices) -> Value {
+      //        auto tensorType = dyn_cast<RankedTensorType>(ptr.getType());
+      //        return self.create<GatherOp>(tensorType, ptr, indices);
+      //      })
+      .def("create_masked_local_gather",
+          [](TritonOpBuilder &self, Value &ptr, Value &indices, std::optional<Value>  &mask,
+             std::optional<Value> &other) -> Value {
+             auto memDescType = dyn_cast<MemDescType>(ptr.getType());
+             auto indexType = dyn_cast<TensorType>(indices.getType());
+             auto shape = indexType.getShape();
+             auto elemType = memDescType.getElementType();
+             auto tensorType = RankedTensorType::get(shape, elemType);
+             return self.create<GatherOp>(tensorType, ptr, indices, mask.value_or(Value()),
+                                          other.value_or(Value()));
            })
       .def("create_store",
            [](TritonOpBuilder &self, Value &ptrs, Value &value,
