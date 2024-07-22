@@ -823,7 +823,6 @@ def cast(input: tl.tensor, dst_ty: tl.dtype, builder: ir.builder,
         if src_sca_ty.is_bool() or not src_sca_ty.is_int_signed():
             return tl.tensor(builder.create_ui_to_fp(input.handle, dst_ty.to_ir(builder)), dst_ty)
         else:
-            print(f"dst tyyy: {dst_ty}")
             return tl.tensor(builder.create_si_to_fp(input.handle, dst_ty.to_ir(builder)), dst_ty)
 
     # Casting pointer types to integer types
@@ -1026,19 +1025,31 @@ def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_
 
 def local_copy(ptr: tl.tensor, builder: ir.builder) -> tl.tensor:
     # Get `pointer_type<elt_ty>` and `elt_ty`
-    ptr_ty = ptr.type.scalar
-    elt_ty = ptr_ty # .element_ty
-    dst_ty = elt_ty
-    return tl.tensor(builder.create_local_copy(ptr.handle), tl.pointer_type(dst_ty, 3))
+    dst_ty = ptr.type.scalar
+    return tl.tensor(builder.create_local_copy(ptr.handle),
+                     tl.pointer_type(dst_ty, 3))
 
 def gather(ptr,
            indices: tl.tensor,
            mask: Optional[tl.tensor], other: Optional[tl.tensor],
            builder: ir.builder) -> tl.tensor:
-    # Get `pointer_type<elt_ty>` and `elt_ty`
-    ptr_ty = ptr.type.scalar
-    elt_ty = ptr_ty # .element_ty
-    dst_ty = elt_ty
+    # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
+    if not ptr.type.scalar.is_ptr():
+        raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
+
+    # For a pointer of scalar, check the type of `mask` and `other`
+    if not ptr.type.is_block():
+        if mask and mask.type.is_block():
+            raise ValueError("Mask argument cannot be block type if pointer argument is not a block")
+        if other and other.type.is_block():
+            raise ValueError("Other argument cannot be block type if pointer argument is not a block")
+
+    # Make `mask` and `other` into the same shape as `ptr`
+    if ptr.type.is_block():
+        if mask is not None:
+            mask = broadcast_impl_shape(mask, ptr.type.get_block_shapes(), builder)
+        if other is not None:
+            other = broadcast_impl_shape(other, ptr.type.get_block_shapes(), builder)
 
     # Get `pointer_type<elt_ty>` and `elt_ty`
     ptr_ty = ptr.type.scalar
@@ -1054,14 +1065,7 @@ def gather(ptr,
     if other is not None:
         other = cast(other, elt_ty, builder)
 
-    # Create loaded result type `dst_ty`
-    if ptr.type.is_block():
-        shape = ptr.type.get_block_shapes()
-        dst_ty = tl.block_type(elt_ty, shape)
-    else:
-        # Load by de-referencing the pointer of scalar
-        dst_ty = elt_ty
-
+    dst_ty = tl.block_type(elt_ty, [dim for dim in indices.shape])
 
     return tl.tensor(
         builder.create_masked_local_gather(ptr.handle,
