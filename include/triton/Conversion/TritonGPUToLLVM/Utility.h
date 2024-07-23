@@ -1488,9 +1488,8 @@ loadSharedToDistributed(RankedTensorType dstTy, MemDescType srcTy,
 
       if (localGatherMask.size()) {
         Value currVal = extract_element(elemLlvmTy, valVec, i32_val(0));
-        auto defaultVal =
-          rewriter.create<LLVM::ConstantOp>(loc, elemLlvmTy,
-                                            rewriter.getZeroAttr(elemLlvmTy));
+        auto defaultVal = rewriter.create<LLVM::ConstantOp>(
+            loc, elemLlvmTy, rewriter.getZeroAttr(elemLlvmTy));
 
         auto selectOp = select(localGatherMask[i], currVal, defaultVal);
         outVals[i] = selectOp;

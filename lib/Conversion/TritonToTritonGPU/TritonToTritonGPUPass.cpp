@@ -523,7 +523,8 @@ public:
   }
 };
 
-class TritonLocalCopyOpPattern : public OpConversionPattern<triton::LocalCopyOp> {
+class TritonLocalCopyOpPattern
+    : public OpConversionPattern<triton::LocalCopyOp> {
 public:
   using OpConversionPattern::OpConversionPattern;
 
@@ -531,9 +532,9 @@ public:
   matchAndRewrite(triton::LocalCopyOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto converter = getTypeConverter();
-    triton::gpu::LocalAllocOp  newOp =
-      rewriter.replaceOpWithNewOp<triton::gpu::LocalAllocOp>(
-          op, op.getType(), adaptor.getOperands());
+    triton::gpu::LocalAllocOp newOp =
+        rewriter.replaceOpWithNewOp<triton::gpu::LocalAllocOp>(
+            op, op.getType(), adaptor.getOperands());
     return success();
   }
 };
@@ -548,16 +549,15 @@ public:
     auto converter = getTypeConverter();
 
     RankedTensorType oldIndexType =
-      cast<RankedTensorType>(adaptor.getIndices().getType());
+        cast<RankedTensorType>(adaptor.getIndices().getType());
     RankedTensorType newType = RankedTensorType::get(
         oldIndexType.getShape(), op.getType().getElementType(),
         oldIndexType.getEncoding());
 
     triton::gpu::LocalGatherOp newOp =
-      rewriter.replaceOpWithNewOp<triton::gpu::LocalGatherOp>(
-          op, newType,
-          adaptor.getSrc(), adaptor.getIndices(),
-          nullptr, nullptr);
+        rewriter.replaceOpWithNewOp<triton::gpu::LocalGatherOp>(
+            op, newType, adaptor.getSrc(), adaptor.getIndices(), nullptr,
+            nullptr);
     return success();
   }
 };
@@ -591,9 +591,7 @@ void populateTritonPatterns(TritonGPUTypeConverter &typeConverter,
       GenericOpPattern<triton::ExperimentalDescriptorLoadOp>,
       GenericOpPattern<triton::ExperimentalDescriptorStoreOp>,
       GenericOpPattern<triton::CallOp>, TritonFuncOpPattern,
-      TritonLocalCopyOpPattern,
-      TritonGatherOpPattern
-  >(typeConverter, context);
+      TritonLocalCopyOpPattern, TritonGatherOpPattern>(typeConverter, context);
 }
 
 //

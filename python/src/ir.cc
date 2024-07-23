@@ -1232,21 +1232,19 @@ void init_triton_ir(py::module &&m) {
              auto rank = tensorType.getRank();
 
              // TODO: Set these with something other tha the defaults
-             auto ctaLayout = triton::gpu::CTALayoutAttr::getDefault(context, rank);
+             auto ctaLayout =
+                 triton::gpu::CTALayoutAttr::getDefault(context, rank);
              SmallVector<unsigned int, 3> order;
              for (unsigned i = 0; i < rank; i++)
                order.push_back(i);
 
-             Attribute encoding =
-                 triton::gpu::SharedEncodingAttr::get(context, 1, 1, 1,
-                                                      order,
-                                                      ctaLayout);
+             Attribute encoding = triton::gpu::SharedEncodingAttr::get(
+                 context, 1, 1, 1, order, ctaLayout);
 
              if (tensorType.getRank() > 1) {
                encoding = triton::gpu::SharedEncodingAttr::get(
                    tensorType.getContext(), tensorType.getShape(), order,
-                   ctaLayout,
-                   tensorType.getElementType());
+                   ctaLayout, tensorType.getElementType());
              }
 
              auto sharedMemorySpace =
@@ -1254,7 +1252,7 @@ void init_triton_ir(py::module &&m) {
 
              MemDescType memDescType =
                  MemDescType::get(shape, elemType, encoding, sharedMemorySpace,
-                                  /*mutableMemory=*/ false);
+                                  /*mutableMemory=*/false);
 
              return self.create<LocalCopyOp>(memDescType, ptr);
            })
@@ -1264,14 +1262,16 @@ void init_triton_ir(py::module &&m) {
       //        return self.create<GatherOp>(tensorType, ptr, indices);
       //      })
       .def("create_masked_local_gather",
-          [](TritonOpBuilder &self, Value &ptr, Value &indices, std::optional<Value>  &mask,
-             std::optional<Value> &other) -> Value {
+           [](TritonOpBuilder &self, Value &ptr, Value &indices,
+              std::optional<Value> &mask,
+              std::optional<Value> &other) -> Value {
              auto memDescType = dyn_cast<MemDescType>(ptr.getType());
              auto indexType = dyn_cast<TensorType>(indices.getType());
              auto shape = indexType.getShape();
              auto elemType = memDescType.getElementType();
              auto tensorType = RankedTensorType::get(shape, elemType);
-             return self.create<GatherOp>(tensorType, ptr, indices, mask.value_or(Value()),
+             return self.create<GatherOp>(tensorType, ptr, indices,
+                                          mask.value_or(Value()),
                                           other.value_or(Value()));
            })
       .def("create_store",

@@ -20,7 +20,6 @@ using ::mlir::LLVM::getStridesFromShapeAndOrder;
 using ::mlir::LLVM::getWrappedMultiDimOffset;
 using ::mlir::LLVM::linearize;
 
-
 struct LocalGatherOpConversion
     : public ConvertOpToLLVMPattern<triton::gpu::LocalGatherOp> {
 public:
@@ -73,8 +72,7 @@ private:
 
     SmallVector<Value> outVals = loadSharedToDistributed(
         dstTy, srcTy, elemLlvmTy, smemObj, loc, rewriter, targetInfo,
-        false /* allowLLs */,
-        indices, maskElems);
+        false /* allowLLs */, indices, maskElems);
 
     Value result = packLLElements(loc, typeConverter, outVals, rewriter, dstTy);
     rewriter.replaceOp(op, result);
@@ -510,5 +508,6 @@ void mlir::triton::populateConvertLayoutOpToLLVMPatterns(
   patterns.add<gpu::ConvertLayoutOpConversion>(typeConverter, targetInfo,
                                                benefit);
   patterns.add<gpu::LocalLoadOpConversion>(typeConverter, targetInfo, benefit);
-  patterns.add<gpu::LocalGatherOpConversion>(typeConverter, targetInfo, benefit);
+  patterns.add<gpu::LocalGatherOpConversion>(typeConverter, targetInfo,
+                                             benefit);
 }
