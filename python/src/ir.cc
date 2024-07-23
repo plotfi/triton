@@ -1230,12 +1230,12 @@ void init_triton_ir(py::module &&m) {
              auto elemType = tensorType.getElementType();
              auto shape = tensorType.getShape();
              auto rank = tensorType.getRank();
-             auto op = cast<LoadOp>(ptr.getDefiningOp());
 
              // TODO: Set these with something other tha the defaults
              auto ctaLayout = triton::gpu::CTALayoutAttr::getDefault(context, rank);
-             SmallVector<unsigned int> order = {0, 1};
-             //triton::gpu::getOrder(tensorType.getEncoding());
+             SmallVector<unsigned int, 3> order;
+             for (unsigned i = 0; i < rank; i++)
+               order.push_back(i);
 
              Attribute encoding =
                  triton::gpu::SharedEncodingAttr::get(context, 1, 1, 1,
@@ -1258,7 +1258,6 @@ void init_triton_ir(py::module &&m) {
 
              return self.create<LocalCopyOp>(memDescType, ptr);
            })
-
       // .def("create_local_gather",
       //      [](TritonOpBuilder &self, Value &ptr, Value &indices) -> Value {
       //        auto tensorType = dyn_cast<RankedTensorType>(ptr.getType());
