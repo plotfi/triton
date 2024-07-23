@@ -531,8 +531,9 @@ public:
   matchAndRewrite(triton::LocalCopyOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto converter = getTypeConverter();
-    llvm::errs() << "FOUND LOCAL COPY OP!!!\n";
-
+    triton::gpu::LocalAllocOp  newOp =
+      rewriter.replaceOpWithNewOp<triton::gpu::LocalAllocOp>(
+          op, op.getType(), adaptor.getOperands());
     return success();
   }
 };
@@ -545,8 +546,18 @@ public:
   matchAndRewrite(triton::GatherOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto converter = getTypeConverter();
-    llvm::errs() << "FOUND GATHER OP!!!\n";
 
+    RankedTensorType oldIndexType =
+      cast<RankedTensorType>(adaptor.getIndices().getType());
+    RankedTensorType newType = RankedTensorType::get(
+        oldIndexType.getShape(), op.getType().getElementType(),
+        oldIndexType.getEncoding());
+
+    triton::gpu::LocalGatherOp newOp =
+      rewriter.replaceOpWithNewOp<triton::gpu::LocalGatherOp>(
+          op, newType,
+          adaptor.getSrc(), adaptor.getIndices(),
+          nullptr, nullptr);
     return success();
   }
 };
