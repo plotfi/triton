@@ -1026,16 +1026,19 @@ def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_
 def local_copy(ptr: tl.tensor, builder: ir.builder) -> tl.tensor:
     # Get `pointer_type<elt_ty>` and `elt_ty`
     dst_ty = ptr.type.scalar
-    return tl.tensor(builder.create_local_copy(ptr.handle),
-                     tl.pointer_type(dst_ty, 3))
+    # TODO: This is a bit of a hack to work around limitations of representing
+    #       memdesc and encodings at python level
+    result = builder.create_local_copy(ptr.handle)
+    return tl.tensor(result,
+                     tl.memdesc_type(result, dst_ty, [dim for dim in ptr.shape], 3))
 
 def gather(ptr,
            indices: tl.tensor,
            mask: Optional[tl.tensor], other: Optional[tl.tensor],
            builder: ir.builder) -> tl.tensor:
     # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
-    if not ptr.type.scalar.is_ptr():
-        raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
+    # if not ptr.type.scalar.is_ptr():
+    #     raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
 
     # For a pointer of scalar, check the type of `mask` and `other`
     if not ptr.type.is_block():

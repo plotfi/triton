@@ -779,6 +779,10 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self, Type &type, int addrSpace) -> Type {
              return PointerType::get(type, addrSpace);
            })
+      .def("get_memdesc_ty",
+           [](TritonOpBuilder &self, Type &type, std::vector<int64_t> &shape,
+              int addrSpace,
+              Value &result) -> Type { return result.getType(); })
       .def("get_block_ty",
            [](TritonOpBuilder &self, Type &elementType,
               std::vector<int64_t> &shape) -> Type {
@@ -788,6 +792,10 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self, std::vector<Type> inTypes,
               std::vector<Type> outTypes) -> Type {
              return self.getBuilder().getFunctionType(inTypes, outTypes);
+           })
+      .def("get_value_ty",
+           [](TritonOpBuilder &self, Value &value) -> Type {
+             return value.getType();
            })
       // locs
       .def("set_loc",

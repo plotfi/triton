@@ -478,6 +478,10 @@ class dtype:
         return False
 
     @staticmethod
+    def is_memdesc():
+        return False
+
+    @staticmethod
     def is_const():
         return False
 
@@ -556,6 +560,57 @@ class dtype:
 _DtypeClass = dtype
 
 
+class memdesc_type(dtype):
+
+    def __init__(self, result, element_ty: dtype, shape: List, address_space: int = 1):
+        element_ty = _unwrap_if_constexpr(element_ty)
+        if not isinstance(element_ty, dtype):
+            raise TypeError(f'element_ty has type `{type(element_ty).__name__}`; expected `dtype`.')
+        self.element_ty = element_ty
+
+        self.result = result
+
+        if not shape:
+            raise TypeError('0d block_type is forbidden')
+        if isinstance(shape[0], constexpr):
+            shape = [s.value for s in shape]
+        self.shape = shape
+
+        self.address_space = address_space
+
+        self.name = f'memdesc<{element_ty}>'
+
+    def to_ir(self, builder: ir.builder) -> ir.memdesc_type:
+        return builder.get_memdesc_ty(self.element_ty.to_ir(builder), self.shape,
+                                      self.address_space, self.result)
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return self.__str__()
+
+    def is_ptr(self):
+        return False
+
+    def is_memdesc(self):
+        return True
+
+    def get_memdesc_shapes(self) -> List[int]:
+        return self.shape
+
+    def __eq__(self, other: memdesc_type) -> bool:
+        if not isinstance(other, memdesc_type):
+            return False
+        return self.element_ty == other.element_ty and self.address_space == other.address_space
+
+    def __ne__(self, other: memdesc_type) -> bool:
+        return not self.__eq__(other)
+
+    @property
+    def scalar(self):
+        return self
+
 class pointer_type(dtype):
 
     def __init__(self, element_ty: dtype, address_space: int = 1):
@@ -578,6 +633,9 @@ class pointer_type(dtype):
 
     def is_ptr(self):
         return True
+
+    def is_memdesc(self):
+        return False
 
     def __eq__(self, other: pointer_type) -> bool:
         if not isinstance(other, pointer_type):

@@ -22,6 +22,8 @@ def mangle_ty(ty):
         if ty.address_space != 1:
             return 'P' + mangle_ty(ty.element_ty) + f'_as{ty.address_space}'
         return 'P' + mangle_ty(ty.element_ty)
+    if ty.is_memdesc():
+        return 'M' + mangle_ty(ty.element_ty)
     if ty.is_int():
         SIGNED = language.dtype.SIGNEDNESS.SIGNED
         prefix = 'i' if ty.int_signedness == SIGNED else 'u'
