@@ -565,10 +565,10 @@ class pointer_type(dtype):
         self.element_ty = element_ty
         self.address_space = address_space
 
-        self.name = f'pointer<{element_ty}>'
+        self.name = f'pointer<{element_ty}, {address_space}>'
 
     def to_ir(self, builder: ir.builder) -> ir.pointer_type:
-        return builder.get_ptr_ty(self.element_ty.to_ir(builder), 1)
+        return builder.get_ptr_ty(self.element_ty.to_ir(builder), self.address_space)
 
     def __str__(self):
         return self.name
