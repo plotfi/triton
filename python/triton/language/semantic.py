@@ -1023,14 +1023,9 @@ def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_
             builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None, cache, eviction,
                                        is_volatile), dst_ty)
 
-def local_copy(ptr: tl.tensor, builder: ir.builder) -> tl.tensor:
-    # Get `pointer_type<elt_ty>` and `elt_ty`
-    dst_ty = ptr.type.scalar
-    # TODO: This is a bit of a hack to work around limitations of representing
-    #       memdesc and encodings at python level
-    result = builder.create_local_copy(ptr.handle)
-    return tl.tensor(result,
-                     tl.memdesc_type(result, dst_ty, [dim for dim in ptr.shape], 3))
+def local_copy(value: tl.tensor, builder: ir.builder) -> tl.tensor:
+    memdesc_ty = tl.memdesc_type(value.shape, value.type.scalar, 3, False)
+    return tl.tensor(builder.create_local_copy(value.handle, memdesc_ty.get_mlir_type(builder)), memdesc_ty)
 
 def gather(ptr,
            indices: tl.tensor,

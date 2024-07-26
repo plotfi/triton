@@ -780,9 +780,29 @@ void init_triton_ir(py::module &&m) {
              return PointerType::get(type, addrSpace);
            })
       .def("get_memdesc_ty",
-           [](TritonOpBuilder &self, Type &type, std::vector<int64_t> &shape,
-              int addrSpace,
-              Value &result) -> Type { return result.getType(); })
+           [](TritonOpBuilder &self, std::vector<int64_t> &shape, Type &type,
+              std::vector<unsigned int> &order, int addrSpace,
+              bool mutableMemory) -> Type {
+             assert(addrSpace == 3 && "Only support shared memory for now");
+
+             auto context = type.getContext();
+             auto elemType = type;
+             auto rank = shape.size();
+
+             auto ctaLayout =
+                 triton::gpu::CTALayoutAttr::getDefault(context, rank);
+             auto encoding = triton::gpu::SharedEncodingAttr::get(
+                 context, 1, 1, 1, order, ctaLayout);
+
+             if (rank > 1)
+               encoding = triton::gpu::SharedEncodingAttr::get(
+                   context, shape, order, ctaLayout, elemType);
+
+             auto sharedMemorySpace =
+                 triton::gpu::SharedMemorySpaceAttr::get(context);
+             return MemDescType::get(shape, elemType, encoding,
+                                     sharedMemorySpace, mutableMemory);
+           })
       .def("get_block_ty",
            [](TritonOpBuilder &self, Type &elementType,
               std::vector<int64_t> &shape) -> Type {
@@ -1232,43 +1252,9 @@ void init_triton_ir(py::module &&m) {
                                         isVolatile);
            })
       .def("create_local_copy",
-           [](TritonOpBuilder &self, Value &ptr) -> Value {
-             auto context = ptr.getContext();
-             auto tensorType = dyn_cast<RankedTensorType>(ptr.getType());
-             auto elemType = tensorType.getElementType();
-             auto shape = tensorType.getShape();
-             auto rank = tensorType.getRank();
-
-             // TODO: Set these with something other tha the defaults
-             auto ctaLayout =
-                 triton::gpu::CTALayoutAttr::getDefault(context, rank);
-             SmallVector<unsigned int, 3> order;
-             for (unsigned i = 0; i < rank; i++)
-               order.push_back(i);
-
-             Attribute encoding = triton::gpu::SharedEncodingAttr::get(
-                 context, 1, 1, 1, order, ctaLayout);
-
-             if (tensorType.getRank() > 1) {
-               encoding = triton::gpu::SharedEncodingAttr::get(
-                   tensorType.getContext(), tensorType.getShape(), order,
-                   ctaLayout, tensorType.getElementType());
-             }
-
-             auto sharedMemorySpace =
-                 triton::gpu::SharedMemorySpaceAttr::get(context);
-
-             MemDescType memDescType =
-                 MemDescType::get(shape, elemType, encoding, sharedMemorySpace,
-                                  /*mutableMemory=*/false);
-
-             return self.create<LocalCopyOp>(memDescType, ptr);
+           [](TritonOpBuilder &self, Value &value, Type &type) -> Value {
+             return self.create<LocalCopyOp>(type, value);
            })
-      // .def("create_local_gather",
-      //      [](TritonOpBuilder &self, Value &ptr, Value &indices) -> Value {
-      //        auto tensorType = dyn_cast<RankedTensorType>(ptr.getType());
-      //        return self.create<GatherOp>(tensorType, ptr, indices);
-      //      })
       .def("create_masked_local_gather",
            [](TritonOpBuilder &self, Value &ptr, Value &indices,
               std::optional<Value> &mask,
