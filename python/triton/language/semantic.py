@@ -1024,7 +1024,7 @@ def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_
                                        is_volatile), dst_ty)
 
 def local_copy(value: tl.tensor, builder: ir.builder) -> tl.tensor:
-    memdesc_ty = tl.memdesc_type(value.shape, value.type.scalar, 3, False)
+    memdesc_ty = tl.shaped_pointer_type(value.shape, value.type.scalar, 3)
     return tl.tensor(builder.create_local_copy(value.handle, memdesc_ty.get_mlir_type(builder)), memdesc_ty)
 
 def gather(ptr,

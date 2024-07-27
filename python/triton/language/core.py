@@ -10,7 +10,6 @@ import builtins
 from ..runtime.jit import jit
 import inspect
 import os
-import builtins as bi
 
 from .._C.libtriton import ir
 from . import semantic
@@ -561,9 +560,9 @@ class dtype:
 _DtypeClass = dtype
 
 
-class memdesc_type(dtype):
+class shaped_pointer_type(dtype):
 
-    def __init__(self, shape: List, element_ty: dtype, address_space: int = 1, mutable_memory: bool = False):
+    def __init__(self, shape: List, element_ty: dtype, address_space: int = 1):
         element_ty = _unwrap_if_constexpr(element_ty)
         rank = len(shape)
         shape = [dim for dim in shape]
@@ -573,19 +572,18 @@ class memdesc_type(dtype):
             raise TypeError(f'element_ty has type `{type(element_ty).__name__}`; expected `dtype`.')
         self.shape = [s.value for s in shape] if isinstance(shape[0], constexpr) else shape
         self.element_ty = element_ty
-        self.order = [i for i in bi.range(rank)]
         self.address_space = address_space
-        self.mutable_memory = mutable_memory
-        self.name = f'memdesc<{self.shape}, {self.element_ty}, {self.order}, {self.address_space}, {self.mutable_memory}>'
+        self.name = f'memdesc<{self.shape}, {self.element_ty}, {self.address_space}>'
         self.mlir_type = None
 
-    def get_mlir_type(self, builder: ir.builder) -> ir.memdesc_type:
+    def get_mlir_type(self, builder: ir.builder) -> ir.shaped_pointer_type:
         if self.mlir_type is None:
-            self.mlir_type = builder.get_memdesc_ty(self.shape, self.element_ty.to_ir(builder),
-                                                      self.order, self.address_space, self.mutable_memory)
+            self.mlir_type = builder.get_memdesc_ty(self.shape,
+                                                    self.element_ty.to_ir(builder),
+                                                    self.address_space)
         return self.mlir_type
 
-    def to_ir(self, builder: ir.builder) -> ir.memdesc_type:
+    def to_ir(self, builder: ir.builder) -> ir.shaped_pointer_type:
         return self.get_mlir_type(builder)
 
     def __str__(self):
@@ -600,14 +598,12 @@ class memdesc_type(dtype):
     def is_memdesc(self):
         return True
 
-    def __eq__(self, other: memdesc_type) -> bool:
-        if not isinstance(other, memdesc_type):
+    def __eq__(self, other: shaped_pointer_type) -> bool:
+        if not isinstance(other, shaped_pointer_type):
             return False
-        return (self.element_ty == other.element_ty and self.shape == other.shape and
-                self.order == other.order and self.address_space == other.address_space and
-                self.mutable_memory == other.mutable_memory)
+        return self.element_ty == other.element_ty and self.address_space == other.address_space and self.shape == other.shape
 
-    def __ne__(self, other: memdesc_type) -> bool:
+    def __ne__(self, other: shaped_pointer_type) -> bool:
         return not self.__eq__(other)
 
     @property

@@ -781,13 +781,16 @@ void init_triton_ir(py::module &&m) {
            })
       .def("get_memdesc_ty",
            [](TritonOpBuilder &self, std::vector<int64_t> &shape, Type &type,
-              std::vector<unsigned int> &order, int addrSpace,
-              bool mutableMemory) -> Type {
+              int addrSpace) -> Type {
              assert(addrSpace == 3 && "Only support shared memory for now");
 
              auto context = type.getContext();
              auto elemType = type;
              auto rank = shape.size();
+
+             SmallVector<unsigned int, 3> order;
+             for (unsigned i = 0; i < rank; i++)
+               order.push_back(i);
 
              auto ctaLayout =
                  triton::gpu::CTALayoutAttr::getDefault(context, rank);
@@ -801,7 +804,8 @@ void init_triton_ir(py::module &&m) {
              auto sharedMemorySpace =
                  triton::gpu::SharedMemorySpaceAttr::get(context);
              return MemDescType::get(shape, elemType, encoding,
-                                     sharedMemorySpace, mutableMemory);
+                                     sharedMemorySpace,
+                                     /*mutableMemory=*/false);
            })
       .def("get_block_ty",
            [](TritonOpBuilder &self, Type &elementType,
@@ -812,10 +816,6 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self, std::vector<Type> inTypes,
               std::vector<Type> outTypes) -> Type {
              return self.getBuilder().getFunctionType(inTypes, outTypes);
-           })
-      .def("get_value_ty",
-           [](TritonOpBuilder &self, Value &value) -> Type {
-             return value.getType();
            })
       // locs
       .def("set_loc",
