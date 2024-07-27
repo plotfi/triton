@@ -12,6 +12,19 @@
 namespace mlir {
 namespace triton {
 
+void LocalCopyOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  Operation *op = getOperation();
+  if (!getType().getMutableMemory() && !op->hasAttr("allocation.offset"))
+    return;
+  effects.emplace_back(MemoryEffects::Allocate::get(),
+                       mlir::triton::SharedMemory::get());
+  if (getSrc())
+    effects.emplace_back(MemoryEffects::Write::get(), getResult(),
+                         mlir::triton::SharedMemory::get());
+}
+
 void LoadOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
         &effects) {

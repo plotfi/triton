@@ -478,6 +478,10 @@ class dtype:
         return False
 
     @staticmethod
+    def is_memdesc():
+        return False
+
+    @staticmethod
     def is_const():
         return False
 
@@ -556,6 +560,56 @@ class dtype:
 _DtypeClass = dtype
 
 
+class shaped_pointer_type(dtype):
+
+    def __init__(self, shape: List, element_ty: dtype, address_space: int = 1):
+        element_ty = _unwrap_if_constexpr(element_ty)
+        rank = len(shape)
+        shape = [dim for dim in shape]
+        if not shape:
+            raise TypeError('Invalid Shape')
+        if not isinstance(element_ty, dtype):
+            raise TypeError(f'element_ty has type `{type(element_ty).__name__}`; expected `dtype`.')
+        self.shape = [s.value for s in shape] if isinstance(shape[0], constexpr) else shape
+        self.element_ty = element_ty
+        self.address_space = address_space
+        self.name = f'memdesc<{self.shape}, {self.element_ty}, {self.address_space}>'
+        self.mlir_type = None
+
+    def get_mlir_type(self, builder: ir.builder) -> ir.shaped_pointer_type:
+        if self.mlir_type is None:
+            self.mlir_type = builder.get_memdesc_ty(self.shape,
+                                                    self.element_ty.to_ir(builder),
+                                                    self.address_space)
+        return self.mlir_type
+
+    def to_ir(self, builder: ir.builder) -> ir.shaped_pointer_type:
+        return self.get_mlir_type(builder)
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return self.__str__()
+
+    def is_ptr(self):
+        return False
+
+    def is_memdesc(self):
+        return True
+
+    def __eq__(self, other: shaped_pointer_type) -> bool:
+        if not isinstance(other, shaped_pointer_type):
+            return False
+        return self.element_ty == other.element_ty and self.address_space == other.address_space and self.shape == other.shape
+
+    def __ne__(self, other: shaped_pointer_type) -> bool:
+        return not self.__eq__(other)
+
+    @property
+    def scalar(self):
+        return self
+
 class pointer_type(dtype):
 
     def __init__(self, element_ty: dtype, address_space: int = 1):
@@ -565,10 +619,10 @@ class pointer_type(dtype):
         self.element_ty = element_ty
         self.address_space = address_space
 
-        self.name = f'pointer<{element_ty}>'
+        self.name = f'pointer<{element_ty}, {address_space}>'
 
     def to_ir(self, builder: ir.builder) -> ir.pointer_type:
-        return builder.get_ptr_ty(self.element_ty.to_ir(builder), 1)
+        return builder.get_ptr_ty(self.element_ty.to_ir(builder), self.address_space)
 
     def __str__(self):
         return self.name
@@ -578,6 +632,9 @@ class pointer_type(dtype):
 
     def is_ptr(self):
         return True
+
+    def is_memdesc(self):
+        return False
 
     def __eq__(self, other: pointer_type) -> bool:
         if not isinstance(other, pointer_type):
@@ -1565,6 +1622,20 @@ def dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_i
 # Non-Atomic Memory Operations
 # -----------------------
 
+
+@builtin
+def local_copy(pointer,  _builder=None):
+    return semantic.local_copy(pointer, _builder)
+
+@builtin
+def gather(pointer, indices, mask=None, other=None, _builder=None):
+    mask = _constexpr_to_value(mask)
+    other = _constexpr_to_value(other)
+    if mask is not None:
+        mask = _to_tensor(mask, _builder)
+    if other is not None:
+        other = _to_tensor(other, _builder)
+    return semantic.gather(pointer, indices, mask, other, _builder)
 
 @builtin
 def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", cache_modifier="", eviction_policy="",
