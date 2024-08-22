@@ -556,8 +556,8 @@ public:
 
     triton::gpu::LocalGatherOp newOp =
         rewriter.replaceOpWithNewOp<triton::gpu::LocalGatherOp>(
-            op, newType, adaptor.getSrc(), adaptor.getIndices(), nullptr,
-            nullptr);
+            op, newType, adaptor.getSrc(), adaptor.getIndices(),
+            adaptor.getMask(), nullptr);
     return success();
   }
 };

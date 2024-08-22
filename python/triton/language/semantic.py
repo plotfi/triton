@@ -1036,11 +1036,11 @@ def gather(ptr,
     #     raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
 
     # For a pointer of scalar, check the type of `mask` and `other`
-    if not ptr.type.is_block():
-        if mask and mask.type.is_block():
-            raise ValueError("Mask argument cannot be block type if pointer argument is not a block")
-        if other and other.type.is_block():
-            raise ValueError("Other argument cannot be block type if pointer argument is not a block")
+    # if not ptr.type.is_block():
+    #     if mask and mask.type.is_block():
+    #         raise ValueError("Mask argument cannot be block type if pointer argument is not a block")
+    #     if other and other.type.is_block():
+    #         raise ValueError("Other argument cannot be block type if pointer argument is not a block")
 
     # Make `mask` and `other` into the same shape as `ptr`
     if ptr.type.is_block():
