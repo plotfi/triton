@@ -5608,3 +5608,19 @@ def test_math_extern(dtype_str, device):
     kernel[(1, )](x_tri, y_tri, shape[0], BLOCK_SIZE=shape[0])
     # compare
     np.testing.assert_allclose(y_ref, to_numpy(y_tri), rtol=0.01)
+
+# -----------------------
+# test loop unrolling
+# -----------------------
+
+
+def test_unroll_attr(device):
+
+    @triton.jit
+    def _kernel(dst, v):
+        pid = tl.program_id(axis=0)
+        for i in tl.range(0, 10, loop_unroll_factor=42):
+            tl.atomic_add(dst + pid, i + pid)
+
+    h = _kernel[(1, )](torch.empty(1, device=device), 3)
+    assert 'tt.loop_unroll_factor = 42' in h.asm["ttir"]
