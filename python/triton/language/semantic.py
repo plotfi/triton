@@ -941,7 +941,7 @@ def _canonicalize_boundary_check(boundary_check, block_shape):
     return ()
 
 
-def _load_block_pointer(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile, builder):
+def _load_block_pointer(ptr, mask, other, sem, scope, boundary_check, padding, cache, eviction, is_volatile, builder):
     # Load by a block pointer: `pointer_type<block_type<>>`
     # Block pointer can not have `mask` and `other` arguments
     if mask is not None or other is not None:
@@ -960,10 +960,10 @@ def _load_block_pointer(ptr, mask, other, boundary_check, padding, cache, evicti
 
     # Build IR
     return tl.tensor(
-        builder.create_tensor_pointer_load(ptr.handle, boundary_check, padding, cache, eviction, is_volatile), dst_ty)
+        builder.create_tensor_pointer_load(ptr.handle, boundary_check, padding, sem, scope, cache, eviction, is_volatile), dst_ty)
 
 
-def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile, builder):
+def _load_legacy(ptr, mask, other, sem, scope, boundary_check, padding, cache, eviction, is_volatile, builder):
     # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
     if not ptr.type.scalar.is_ptr():
         raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
@@ -1014,10 +1014,10 @@ def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_
 
     # Build IR
     if mask is None:
-        return tl.tensor(builder.create_load(ptr.handle, cache, eviction, is_volatile), dst_ty)
+        return tl.tensor(builder.create_load(ptr.handle, sem, scope, cache, eviction, is_volatile), dst_ty)
     else:
         return tl.tensor(
-            builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None, cache, eviction,
+            builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None, sem, scope, cache, eviction,
                                        is_volatile), dst_ty)
 
 
@@ -1029,13 +1029,31 @@ def load(ptr: tl.tensor, mask: Optional[tl.tensor], other: Optional[tl.tensor], 
     eviction = _str_to_eviction_policy(eviction_policy)
     padding = _str_to_padding_option(padding_option)
 
+    sem = None
+    scope = None
     if ptr.type.is_ptr() and ptr.type.element_ty.is_block():
         # Load by a block pointer: `pointer_type<block_type<>>`
-        return _load_block_pointer(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile, builder)
+        return _load_block_pointer(ptr, mask, other, sem, scope, boundary_check, padding, cache, eviction, is_volatile, builder)
     else:
         # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
-        return _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile, builder)
+        return _load_legacy(ptr, mask, other, sem, scope, boundary_check, padding, cache, eviction, is_volatile, builder)
 
+def atomic_load(ptr: tl.tensor, mask: Optional[tl.tensor], other: Optional[tl.tensor], sem: str, scope: str, boundary_check: Tuple,
+         padding_option: str, cache_modifier: str, eviction_policy: str, is_volatile: bool,
+         builder: ir.builder) -> tl.tensor:
+    # Cache, eviction and padding options
+    cache = _str_to_load_cache_modifier(cache_modifier)
+    eviction = _str_to_eviction_policy(eviction_policy)
+    padding = _str_to_padding_option(padding_option)
+
+    sem = _str_to_sem(sem)
+    scope = _str_to_scope(scope)
+    if ptr.type.is_ptr() and ptr.type.element_ty.is_block():
+        # Load by a block pointer: `pointer_type<block_type<>>`
+        return _load_block_pointer(ptr, mask, other, sem, scope, boundary_check, padding, cache, eviction, is_volatile, builder)
+    else:
+        # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
+        return _load_legacy(ptr, mask, other, sem, scope, boundary_check, padding, cache, eviction, is_volatile, builder)
 
 def descriptor_load(desc_ptr: tl.tensor, offsets, cache_modifier: str, eviction_policy: str, type,
                     builder: ir.builder) -> tl.tensor:
@@ -1051,7 +1069,7 @@ def descriptor_store(desc_ptr: tl.tensor, value: tl.tensor, offsets, builder: ir
     return tl.tensor(builder.create_descriptor_store(desc_ptr.handle, value.handle, offsets), tl.void)
 
 
-def _store_block_pointer(ptr, val, mask, boundary_check, cache, eviction, builder):
+def _store_block_pointer(ptr, val, mask, sem, scope, boundary_check, cache, eviction, builder):
     # Store by a block pointer: `pointer_type<block_type<>>`
     # Block pointers can not have the `mask` argument
     if mask is not None:
@@ -1076,11 +1094,11 @@ def _store_block_pointer(ptr, val, mask, boundary_check, cache, eviction, builde
     val = cast(val, elt_ty, builder)
 
     # Build IR
-    return tl.tensor(builder.create_tensor_pointer_store(ptr.handle, val.handle, boundary_check, cache, eviction),
+    return tl.tensor(builder.create_tensor_pointer_store(ptr.handle, val.handle, boundary_check, sem, scope, cache, eviction),
                      tl.void)
 
 
-def _store_legacy(ptr, val, mask, boundary_check, cache, eviction, builder):
+def _store_legacy(ptr, val, mask, sem, scope, boundary_check, cache, eviction, builder):
     # Store by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
     if not ptr.type.scalar.is_ptr():
         raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.store`")
@@ -1118,10 +1136,10 @@ def _store_legacy(ptr, val, mask, boundary_check, cache, eviction, builder):
 
     # Build IR
     if not mask:
-        return tl.tensor(builder.create_store(ptr.handle, val.handle, cache, eviction), tl.void)
+        return tl.tensor(builder.create_store(ptr.handle, val.handle, sem, scope, cache, eviction), tl.void)
     if not mask.type.scalar.is_bool():
         raise ValueError("Mask must have boolean scalar type")
-    return tl.tensor(builder.create_masked_store(ptr.handle, val.handle, mask.handle, cache, eviction), tl.void)
+    return tl.tensor(builder.create_masked_store(ptr.handle, val.handle, mask.handle, sem, scope, cache, eviction), tl.void)
 
 
 def store(ptr: tl.tensor, val: tl.tensor, mask: Optional[tl.tensor], boundary_check, cache_modifier: str,
@@ -1133,13 +1151,32 @@ def store(ptr: tl.tensor, val: tl.tensor, mask: Optional[tl.tensor], boundary_ch
     if ptr.type.is_const() or ptr.type.scalar.is_const():
         raise ValueError("Cannot store to a constant pointer")
 
+    sem = None
+    scope = None
     if ptr.type.is_ptr() and ptr.type.element_ty.is_block():
         # Store by a block pointer: `pointer_type<block_type<>>`
-        return _store_block_pointer(ptr, val, mask, boundary_check, cache, eviction, builder)
+        return _store_block_pointer(ptr, val, mask, sem, scope, boundary_check, cache, eviction, builder)
     else:
         # Store by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
-        return _store_legacy(ptr, val, mask, boundary_check, cache, eviction, builder)
+        return _store_legacy(ptr, val, mask, sem, scope, boundary_check, cache, eviction, builder)
 
+def atomic_store(ptr: tl.tensor, val: tl.tensor, mask: Optional[tl.tensor], sem: str, scope: str, boundary_check, cache_modifier: str,
+          eviction_policy: str, builder: ir.builder) -> tl.tensor:
+    # Cache and eviction options
+    cache = _str_to_store_cache_modifier(cache_modifier)
+    eviction = _str_to_eviction_policy(eviction_policy)
+
+    if ptr.type.is_const() or ptr.type.scalar.is_const():
+        raise ValueError("Cannot store to a constant pointer")
+
+    sem = _str_to_sem(sem)
+    scope = _str_to_scope(scope)
+    if ptr.type.is_ptr() and ptr.type.element_ty.is_block():
+        # Store by a block pointer: `pointer_type<block_type<>>`
+        return _store_block_pointer(ptr, val, mask, sem, scope, boundary_check, cache, eviction, builder)
+    else:
+        # Store by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
+        return _store_legacy(ptr, val, mask, sem, scope, boundary_check, cache, eviction, builder)
 
 #########
 # atomic

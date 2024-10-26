@@ -1200,47 +1200,66 @@ void init_triton_ir(py::module &&m) {
            })
       // Input/Output
       .def("create_load",
-           [](TritonOpBuilder &self, Value &ptrs, CacheModifier cacheModifier,
+           [](TritonOpBuilder &self, Value &ptrs,
+              std::optional<MemSemantic> sem, std::optional<MemSyncScope> scope,
+              CacheModifier cacheModifier,
               EvictionPolicy evictionPolicy, bool isVolatile) -> Value {
-             return self.create<LoadOp>(ptrs, cacheModifier, evictionPolicy,
+             return self.create<LoadOp>(ptrs,
+                                        sem, scope,
+                                        cacheModifier, evictionPolicy,
                                         isVolatile);
            })
       .def("create_store",
            [](TritonOpBuilder &self, Value &ptrs, Value &value,
+              std::optional<MemSemantic> sem, std::optional<MemSyncScope> scope,
               CacheModifier cacheModifier,
               EvictionPolicy evictionPolicy) -> void {
-             self.create<StoreOp>(ptrs, value, cacheModifier, evictionPolicy);
+             self.create<StoreOp>(ptrs, value,
+                                  sem, scope,
+                                  cacheModifier, evictionPolicy);
            })
       .def("create_tensor_pointer_load",
            [](TritonOpBuilder &self, Value &ptr,
               std::vector<int32_t> &boundaryCheck,
               std::optional<PaddingOption> paddingOption,
+              std::optional<MemSemantic> sem, std::optional<MemSyncScope> scope,
               CacheModifier cacheModifier, EvictionPolicy evictionPolicy,
               bool isVolatile) -> Value {
              return self.create<LoadOp>(ptr, boundaryCheck, paddingOption,
+                                        sem, scope,
                                         cacheModifier, evictionPolicy,
                                         isVolatile);
            })
       .def("create_tensor_pointer_store",
            [](TritonOpBuilder &self, Value &ptr, Value &val,
-              std::vector<int32_t> &boundaryCheck, CacheModifier cacheModifier,
+              std::vector<int32_t> &boundaryCheck,
+              std::optional<MemSemantic> sem, std::optional<MemSyncScope> scope,
+              CacheModifier cacheModifier,
               EvictionPolicy evictionPolicy) -> void {
-             self.create<StoreOp>(ptr, val, boundaryCheck, cacheModifier,
+             self.create<StoreOp>(ptr, val, boundaryCheck,
+                                  sem, scope,
+                                  cacheModifier,
                                   evictionPolicy);
            })
       .def("create_masked_load",
            [](TritonOpBuilder &self, Value &ptrs, Value &mask,
-              std::optional<Value> &other, CacheModifier cacheModifier,
+              std::optional<Value> &other,
+              std::optional<MemSemantic> sem, std::optional<MemSyncScope> scope,
+              CacheModifier cacheModifier,
               EvictionPolicy evictionPolicy, bool isVolatile) -> Value {
              return self.create<LoadOp>(ptrs, mask, other.value_or(Value()),
+                                        sem, scope,
                                         cacheModifier, evictionPolicy,
                                         isVolatile);
            })
       .def("create_masked_store",
            [](TritonOpBuilder &self, Value &ptrs, Value &val, Value &mask,
+              std::optional<MemSemantic> sem, std::optional<MemSyncScope> scope,
               CacheModifier cacheModifier,
               EvictionPolicy evictionPolicy) -> void {
-             self.create<StoreOp>(ptrs, val, mask, cacheModifier,
+             self.create<StoreOp>(ptrs, val, mask,
+                                  sem, scope,
+                                  cacheModifier,
                                   evictionPolicy);
            })
       .def("create_descriptor_load",

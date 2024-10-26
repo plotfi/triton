@@ -1545,6 +1545,80 @@ def test_tensor_atomic_cas(sem, num_ctas, device):
     assert (torch.equal(X, Y))
 
 
+@pytest.mark.interpreter
+def test_load_scope_sem(device):
+
+    @triton.jit
+    def kernel_r(ptrs, BLOCK_SIZE: tl.constexpr):
+        numel = 512
+        offset = tl.program_id(0) * BLOCK_SIZE
+        index = offset + tl.arange(0, BLOCK_SIZE)[:, None]
+        mask = index < numel
+        chunk = index % 64
+
+        a = tl.atomic_load(ptrs + chunk, mask=mask,sem='relaxed', scope='cta')
+        tl.atomic_store(ptrs + chunk, a, sem='acquire', scope='gpu')
+
+        a = tl.atomic_load(ptrs + chunk, sem='relaxed', scope='cta')
+        tl.atomic_store(ptrs + chunk, a + 1, sem='acquire', scope='gpu')
+
+        # cluster not handled in Triton yet
+        # a = a + tl.load(ptrs, sem='relaxed', scope='cluster')
+        # tl.store(ptrs, a + 1, sem='acquire', scope='gpu')
+
+        a = a + tl.atomic_load(ptrs + chunk, mask=mask, sem='relaxed', scope='gpu')
+        tl.atomic_store(ptrs + chunk, a + 1, sem='acquire', scope='sys')
+
+        a = a + tl.atomic_load(ptrs + chunk, sem='relaxed', scope='gpu')
+        tl.atomic_store(ptrs + chunk, a + 1, sem='acquire', scope='sys')
+
+        a = a + tl.atomic_load(ptrs + chunk, sem='relaxed', scope='sys')
+        tl.atomic_store(ptrs + chunk, a + 1, sem='acquire', scope='cta')
+
+
+    @triton.jit
+    def kernel_a(ptrs, BLOCK_SIZE: tl.constexpr):
+        numel = 512
+        offset = tl.program_id(0) * BLOCK_SIZE
+        index = offset + tl.arange(0, BLOCK_SIZE)[:, None]
+        mask = index < numel
+        chunk = index % 64
+
+        a = tl.atomic_load(ptrs + chunk, sem='acquire', scope='cta')
+        tl.atomic_store(ptrs + chunk, a + 1, sem='relaxed', scope='gpu')
+        # cluster not handled in Triton yet
+        # a = a + tl.load(ptrs, sem='acquire', scope='cluster')
+        # tl.store(ptrs, a + 1, sem='relaxed', scope='gpu')
+        a = a + tl.atomic_load(ptrs + chunk, sem='acquire', scope='gpu')
+        tl.atomic_store(ptrs + chunk, a + 1, sem='relaxed', scope='sys')
+        a = a + tl.atomic_load(ptrs + chunk, sem='acquire', scope='sys')
+        tl.atomic_store(ptrs + chunk, a + 1, sem='relaxed', scope='cta')
+
+    block_size = 128
+    data = torch.zeros((128, ), device=device, dtype=torch.float32)
+    out_r = kernel_r[(2, )](data, BLOCK_SIZE=block_size)
+    out_a = kernel_a[(2, )](data, BLOCK_SIZE=block_size)
+
+    assert 1 == len(re.findall(r'tt\.load %[0-9]+, %[0-9]+, relaxed, cta', out_r.asm['ttir']))
+    assert 1 == len(re.findall(r'tt\.load %[0-9]+, relaxed, cta', out_r.asm['ttir']))
+    assert 1 == len(re.findall(r'tt\.load %[0-9]+, %[0-9]+, relaxed, gpu', out_r.asm['ttir']))
+    assert 1 == len(re.findall(r'tt\.load %[0-9]+, relaxed, gpu', out_r.asm['ttir']))
+    assert 1 == len(re.findall(r'tt\.load %[0-9]+, relaxed, sys', out_r.asm['ttir']))
+
+    assert 1 == len(re.findall(r'tt\.load %[0-9]+, acquire, cta', out_a.asm['ttir']))
+    assert 1 == len(re.findall(r'tt\.load %[0-9]+, acquire, gpu', out_a.asm['ttir']))
+    assert 1 == len(re.findall(r'tt\.load %[0-9]+, acquire, sys', out_a.asm['ttir']))
+
+    assert 2 == len(re.findall(r'tt\.store %[0-9]+, %[0-9]+, acquire, gpu', out_r.asm['ttir']))
+    assert 2 == len(re.findall(r'tt\.store %[0-9]+, %[0-9]+, acquire, sys', out_r.asm['ttir']))
+    assert 1 == len(re.findall(r'tt\.store %[0-9]+, %[0-9]+, acquire, cta', out_r.asm['ttir']))
+
+    assert 1 == len(re.findall(r'tt\.store %[0-9]+, %[0-9]+, relaxed, gpu', out_a.asm['ttir']))
+    assert 1 == len(re.findall(r'tt\.store %[0-9]+, %[0-9]+, relaxed, sys', out_a.asm['ttir']))
+    assert 1 == len(re.findall(r'tt\.store %[0-9]+, %[0-9]+, relaxed, cta', out_a.asm['ttir']))
+
+
+
 # ---------------
 # test cast
 # ---------------
