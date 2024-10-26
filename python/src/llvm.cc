@@ -38,6 +38,10 @@ struct BreakStructPhiNodesPass : PassInfoMixin<BreakStructPhiNodesPass> {
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
   static StringRef name() { return "BreakStructPhiNodesPass"; }
 };
+struct InlineAsmRewritePass : PassInfoMixin<InlineAsmRewritePass> {
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+  static StringRef name() { return "InlineAsmRewritePass"; }
+};
 } // namespace llvm
 
 using namespace llvm;
@@ -384,6 +388,7 @@ void init_triton_llvm(py::module &&m) {
               // optimizations, we run a pass to break up phi of struct to make
               // sure all the struct are removed for the following passes.
               fpm.addPass(BreakStructPhiNodesPass());
+              fpm.addPass(InlineAsmRewritePass());
               fpm.addPass(InstCombinePass());
             });
         bool enableAddressSanitizer =
