@@ -1059,6 +1059,56 @@ def _load_block_pointer(ptr, mask, other, boundary_check, padding, cache, evicti
     return tl.tensor(
         builder.create_tensor_pointer_load(ptr.handle, boundary_check, padding, cache, eviction, is_volatile), dst_ty)
 
+# __FACEBOOK__ (facebook) begin T203329359
+def local_copy(value: tl.tensor, builder: ir.builder) -> tl.tensor:
+    memdesc_ty = tl.shaped_pointer_type(value.shape, value.type.scalar, 3)
+    return tl.tensor(builder.create_local_copy(value.handle, memdesc_ty.get_mlir_type(builder)), memdesc_ty)
+
+def gather(ptr,
+           indices: tl.tensor,
+           mask: Optional[tl.tensor], other: Optional[tl.tensor],
+           builder: ir.builder) -> tl.tensor:
+    # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
+    # if not ptr.type.scalar.is_ptr():
+    #     raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
+
+    # For a pointer of scalar, check the type of `mask` and `other`
+    # if not ptr.type.is_block():
+    #     if mask and mask.type.is_block():
+    #         raise ValueError("Mask argument cannot be block type if pointer argument is not a block")
+    #     if other and other.type.is_block():
+    #         raise ValueError("Other argument cannot be block type if pointer argument is not a block")
+
+    # Make `mask` and `other` into the same shape as `ptr`
+    if ptr.type.is_block():
+        if mask is not None:
+            mask = broadcast_impl_shape(mask, ptr.type.get_block_shapes(), builder)
+        if other is not None:
+            other = broadcast_impl_shape(other, ptr.type.get_block_shapes(), builder)
+
+    # Get `pointer_type<elt_ty>` and `elt_ty`
+    ptr_ty = ptr.type.scalar
+    elt_ty = ptr_ty.element_ty
+
+    # Treat `pointer_type<tl.int1>` as `pointer_type<tl.int8>`
+    if elt_ty == tl.int1:
+        elt_ty = tl.int8
+        ptr_ty = tl.pointer_type(elt_ty, ptr_ty.address_space)
+        ptr = cast(ptr, ptr_ty, builder)
+
+    # Cast `other` into `ele_ty` type
+    if other is not None:
+        other = cast(other, elt_ty, builder)
+
+    dst_ty = tl.block_type(elt_ty, [dim for dim in indices.shape])
+
+    return tl.tensor(
+        builder.create_masked_local_gather(ptr.handle,
+                                           indices.handle,
+                                           mask.handle if mask else None,
+                                           other.handle if other else None),
+        dst_ty)
+# __FACEBOOK__ (facebook) end T203329359
 
 def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile, builder):
     # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`

@@ -12,6 +12,10 @@
 namespace mlir {
 namespace triton {
 
+/// __FACEBOOK__ (facebook) begin T203329359
+#include "Ops_LocalCopyOp.h"
+/// __FACEBOOK__ (facebook) end T203329359
+
 void LoadOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
         &effects) {

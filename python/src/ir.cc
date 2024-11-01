@@ -778,6 +778,39 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self, Type &type, int addrSpace) -> Type {
              return PointerType::get(type, addrSpace);
            })
+      /// __FACEBOOK__ (facebook) begin T203329359
+      .def("get_memdesc_ty",
+           [](TritonOpBuilder &self, std::vector<int64_t> &shape, Type &type,
+              int addrSpace) -> Type {
+             assert(addrSpace == 3 && "Only support shared memory for now");
+
+             auto context = type.getContext();
+             auto elemType = type;
+             auto rank = shape.size();
+
+             SmallVector<unsigned int, 3> order;
+             for (unsigned i = 0; i < rank; i++)
+               order.push_back(i);
+
+             auto ctaLayout =
+                 triton::gpu::CTALayoutAttr::getDefault(context, rank);
+             auto encoding = triton::gpu::SharedEncodingAttr::get(
+                 context, 1, 1, 1, order, ctaLayout);
+
+             if (rank > 1)
+               encoding = triton::gpu::SharedEncodingAttr::get(
+                   context, shape, order, ctaLayout, elemType);
+
+             auto sharedMemorySpace =
+               triton::gpu::SharedMemorySpaceAttr::get(context);
+
+             MemDescType memDescType =
+               MemDescType::get(shape, elemType, encoding, sharedMemorySpace,
+                   /*mutableMemory=*/false);
+
+             return memDescType;
+           })
+      /// __FACEBOOK__ (facebook) end T203329359
       .def("get_block_ty",
            [](TritonOpBuilder &self, Type &elementType,
               std::vector<int64_t> &shape) -> Type {
@@ -1222,6 +1255,25 @@ void init_triton_ir(py::module &&m) {
              return self.create<LoadOp>(ptrs, cacheModifier, evictionPolicy,
                                         isVolatile);
            })
+      /// __FACEBOOK__ (facebook) begin T203329359
+      .def("create_local_copy",
+           [](TritonOpBuilder &self, Value &value, Type &type) -> Value {
+             return self.create<LocalCopyOp>(type, value);
+           })
+      .def("create_masked_local_gather",
+           [](TritonOpBuilder &self, Value &ptr, Value &indices,
+              std::optional<Value> &mask,
+              std::optional<Value> &other) -> Value {
+             auto memDescType = dyn_cast<MemDescType>(ptr.getType());
+             auto indexType = dyn_cast<TensorType>(indices.getType());
+             auto shape = indexType.getShape();
+             auto elemType = memDescType.getElementType();
+             auto tensorType = RankedTensorType::get(shape, elemType);
+             return self.create<GatherOp>(tensorType, ptr, indices,
+                                          mask.value_or(Value()),
+                                          other.value_or(Value()));
+           })
+      /// __FACEBOOK__ (facebook) end T203329359
       .def("create_store",
            [](TritonOpBuilder &self, Value &ptrs, Value &value,
               CacheModifier cacheModifier,

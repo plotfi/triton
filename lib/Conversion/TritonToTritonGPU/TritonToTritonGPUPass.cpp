@@ -523,6 +523,10 @@ public:
   }
 };
 
+/// __FACEBOOK__ (facebook) begin T203329359
+#include "TritonToTritonGPUPass_SMEMOps.h"
+/// __FACEBOOK__ (facebook) end T203329359
+
 void populateTritonPatterns(TritonGPUTypeConverter &typeConverter,
                             RewritePatternSet &patterns, unsigned numCTAs) {
   MLIRContext *context = patterns.getContext();
@@ -553,9 +557,13 @@ void populateTritonPatterns(TritonGPUTypeConverter &typeConverter,
       GenericOpPattern<triton::ExperimentalDescriptorStoreOp>,
       GenericOpPattern<triton::ExperimentalTensormapCreateOp>,
       GenericOpPattern<triton::ExperimentalTensormapFenceproxyAcquireOp>,
-      // this assumes the right layout will be set later for dot scaled.
-      GenericOpPattern<triton::DotScaledOp>, GenericOpPattern<triton::CallOp>,
-      TritonFuncOpPattern>(typeConverter, context);
+      /// __FACEBOOK__ (facebook) begin T203329359
+      TritonLocalCopyOpPattern,
+      TritonGatherOpPat
+          // this assumes the right layout will be set later for dot scaled.
+          GenericOpPattern<triton::DotScaledOp>,
+      GenericOpPattern<triton::CallOp>, TritonFuncOpPattern>(typeConverter,
+                                                             context);
 }
 
 //

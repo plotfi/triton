@@ -75,6 +75,10 @@ from .core import (
     int64,
     int8,
     join,
+    # __FACEBOOK__ (facebook) begin T203329359
+    local_copy,
+    gather,
+    # __FACEBOOK__ (facebook) end T203329359
     load,
     make_block_ptr,
     max_constancy,
@@ -193,6 +197,10 @@ __all__ = [
     "int8",
     "ir",
     "join",
+    # __FACEBOOK__ (facebook) begin T203329359
+    "local_copy",
+    "gather",
+    # __FACEBOOK__ (facebook) end T203329359
     "load",
     "log",
     "log2",

@@ -20,6 +20,10 @@ from types import ModuleType
 def mangle_ty(ty):
     if ty.is_ptr():
         return 'P' + mangle_ty(ty.element_ty)
+    # __FACEBOOK__ (facebook) begin T203329359
+    if ty.is_memdesc():
+        return 'M' + mangle_ty(ty.element_ty)
+    # __FACEBOOK__ (facebook) end T203329359
     if ty.is_int():
         SIGNED = language.dtype.SIGNEDNESS.SIGNED
         prefix = 'i' if ty.int_signedness == SIGNED else 'u'

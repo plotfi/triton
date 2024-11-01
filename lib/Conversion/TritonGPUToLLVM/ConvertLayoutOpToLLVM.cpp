@@ -29,6 +29,10 @@ using namespace mlir::triton::gpu;
 // because LinearLayout seems to have some performance issues.
 constexpr bool useLegacyMMAConversion = false;
 
+/// __FACEBOOK__ (facebook) begin T203329359
+#include "ConvertLayoutOpToLLVM_LocalGatherOpConversion.h"
+/// __FACEBOOK__ (facebook) end T203329359
+
 struct ConvertLayoutOpConversion
     : public ConvertOpToLLVMPattern<ConvertLayoutOp> {
 public:
@@ -705,4 +709,7 @@ void mlir::triton::populateConvertLayoutOpToLLVMPatterns(
   patterns.add<ConvertLayoutOpBlockedToDotOpShortcutConversion>(
       typeConverter, targetInfo, benefit);
   patterns.add<ConvertLayoutOpConversion>(typeConverter, targetInfo, benefit);
+  /// __FACEBOOK__ (facebook) begin T203329359
+  patterns.add<LocalGatherOpConversion>(typeConverter, targetInfo, benefit);
+  /// __FACEBOOK__ (facebook) end T203329359
 }

@@ -275,5 +275,8 @@ def TTG_UpcastMXFPOp : TTG_Op<"upcast_mxfp", [Pure, DeclareOpInterfaceMethods<In
     $src `,` $scale  `fp_type` `=` $fp_type attr-dict `:` type($src) `,` type($scale) `->` type($result)
   }];
 }
+/// __FACEBOOK__ (facebook) begin T203329359
+include "triton/Dialect/TritonGPU/IR/TritonGPUOps_LocalGatherOp.td"
+/// __FACEBOOK__ (facebook) end T203329359
 
 #endif

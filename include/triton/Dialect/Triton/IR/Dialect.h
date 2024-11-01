@@ -23,6 +23,12 @@
 namespace mlir {
 namespace triton {
 
+/// __FACEBOOK__ (facebook) begin T203329359
+struct SharedMemory : public SideEffects::Resource::Base<SharedMemory> {
+  StringRef getName() final { return "<SharedMemory>"; }
+};
+/// __FACEBOOK__ (facebook) end T203329359
+
 struct GlobalMemory : public SideEffects::Resource::Base<GlobalMemory> {
   StringRef getName() final { return "<GlobalMemory>"; }
 };

@@ -24,6 +24,9 @@ include "triton/Dialect/Triton/IR/TritonTypeInterfaces.td"
 // Interfaces
 //
 def GlobalMemory : Resource<"::mlir::triton::GlobalMemory">;
+/// __FACEBOOK__ (facebook) begin T203329359
+def SharedMemory : Resource<"::mlir::triton::SharedMemory">;
+/// __FACEBOOK__ (facebook) end T203329359
 
 //
 // Op Base
@@ -224,6 +227,10 @@ def TT_AdvanceOp : TT_Op<"advance",
 
     let hasFolder = 1;
 }
+
+/// __FACEBOOK__ (facebook) begin T203329359
+include "triton/Dialect/Triton/IR/TritonOps_SMEMOps.td"
+/// __FACEBOOK__ (facebook) end T203329359
 
 //
 // Load/Store Ops

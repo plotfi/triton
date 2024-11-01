@@ -48,6 +48,10 @@ using namespace mlir;
 using namespace mlir::triton;
 using namespace mlir::triton::gpu;
 
+/// __FACEBOOK__ (facebook) begin T203329359
+#include "ConvertLayoutOpToLLVM_LocalGatherOpConversion.h"
+/// __FACEBOOK__ (facebook) end T203329359
+
 struct LocalLoadOpConversion
     : public ConvertOpToLLVMPattern<triton::gpu::LocalLoadOp> {
 public:
@@ -757,6 +761,9 @@ void mlir::triton::NVIDIA::populateConvertLayoutOpToLLVMOptimizedPatterns(
     LLVMTypeConverter &typeConverter, const TargetInfo &targetInfo,
     RewritePatternSet &patterns, PatternBenefit benefit) {
   patterns.add<LocalAllocOpConversion>(typeConverter, targetInfo, benefit);
+  /// __FACEBOOK__ (facebook) begin T203329359
+  patterns.add<LocalGatherOpConversion>(typeConverter, targetInfo, benefit);
+  /// __FACEBOOK__ (facebook) end T203329359
 }
 
 void mlir::triton::NVIDIA::populateConvertLayoutOpToLLVMPatterns(
