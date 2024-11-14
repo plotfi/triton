@@ -490,6 +490,14 @@ public:
   Operation *rewriteOp(Operation *op, std::stack<Operation *> &eraser) {
     OpBuilder builder(op);
 
+    // if (auto reshapeOp = dyn_cast<triton::ReshapeOp>(op)) {
+    //   llvm::errs() << "Found RESHAPE OP: ";
+    //   reshapeOp->dump();
+
+    //   llvm::errs() << "SRC: ";
+    //   reshapeOp.getSrc().dump();
+    // }
+
     // Rewrite `make_tensor_ptr` and `advance` and make a tensor of pointers
     // Rewriting functions return the next operation to visit, if there is no
     // next one, simply return `nullptr`

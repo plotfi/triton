@@ -37,6 +37,17 @@ def TritonReorderBroadcast : Pass</*cli-arg*/"triton-reorder-broadcast", /*Op*/"
   let dependentDialects = ["mlir::triton::TritonDialect"];
 }
 
+def TritonTTIRPeepHole : Pass</*cli-arg*/"triton-ttir-peephole", /*Op*/"mlir::ModuleOp"> {
+  let summary = "Does various peephole folding optimizations on TTIR level";
+  let description = [{
+    This pass does TTIR level peephole optimizations
+  }];
+
+  let constructor = "mlir::triton::createTTIRPeepHolePass()";
+
+  let dependentDialects = ["mlir::triton::TritonDialect"];
+}
+
 def TritonRewriteTensorPointer : Pass</*cli-arg*/"triton-rewrite-tensor-pointer", /*Op*/"mlir::ModuleOp"> {
   let summary = "Rewrite load/stores with tensor pointers into legacy load/stores";
   let description = [{
