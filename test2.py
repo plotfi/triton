@@ -20,6 +20,10 @@ def epilogue_fn(x: tl.tensor, EPILOGUE: tl.constexpr) -> tl.tensor:
     if EPILOGUE == "noop_reshape":
         x = x.reshape(M, N // 2, 2)
         x = x.reshape(M, N)
+        x = x.reshape(M, N // 2, 2)
+        x = x.reshape(M, N)
+        x = x.reshape(M, N // 2, 2)
+        x = x.reshape(M, N)
 
     elif EPILOGUE == "faux_rotate":
         # In reality this is `x0 * cos - x1 * sin` and `x1 * cos + x0 * sin`
