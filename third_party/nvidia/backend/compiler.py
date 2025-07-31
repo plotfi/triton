@@ -14,6 +14,7 @@ import signal
 import os
 import subprocess
 from pathlib import Path
+import json
 
 
 def min_dot_size(target: GPUTarget):
@@ -234,77 +235,114 @@ class CUDABackend(BaseBackend):
         return mod
 
     @staticmethod
-    def make_ttgir(mod, metadata, opt, capability):
+    def make_ttgir_pass_config(num_warps, num_ctas, num_stages, capability, cluster_dims, dump_enabled):
+        cluster_info = nvidia.ClusterInfo()
+        if cluster_dims is not None:
+            cluster_info.clusterDimX = cluster_dims[0]
+            cluster_info.clusterDimY = cluster_dims[1]
+            cluster_info.clusterDimZ = cluster_dims[2]
+        pass_config = dict()
+        pass_config["ttir.add_convert_to_ttgpuir"] = [passes.ttir.add_convert_to_ttgpuir, [f"cuda:{capability}", num_warps, 32, num_ctas]]
+        # optimize TTGIR
+        pass_config["ttgpuir.add_coalesce"] = [passes.ttgpuir.add_coalesce, []]
+
+        if capability // 10 >= 8:
+            pass_config["ttgpuir.add_f32_dot_tc"] = [passes.ttgpuir.add_f32_dot_tc, []]
+
+        # TODO(Qingyi): Move PlanCTAPass to the front of CoalescePass
+        pass_config["ttnvgpuir.add_plan_cta"] = [nvidia.passes.ttnvgpuir.add_plan_cta, [cluster_info]]
+        pass_config["ttgpuir.add_remove_layout_conversions"] = [passes.ttgpuir.add_remove_layout_conversions, []]
+        pass_config["ttgpuir.add_optimize_thread_locality"] = [passes.ttgpuir.add_optimize_thread_locality, []]
+        pass_config["ttgpuir.add_accelerate_matmul"] = [passes.ttgpuir.add_accelerate_matmul, []]
+        pass_config["ttgpuir.add_remove_layout_conversions"] = [passes.ttgpuir.add_remove_layout_conversions, []]
+        pass_config["ttgpuir.add_optimize_dot_operands"] = [passes.ttgpuir.add_optimize_dot_operands, [capability >= 80]]
+        pass_config["ttnvgpuir.add_optimize_descriptor_encoding"] = [nvidia.passes.ttnvgpuir.add_optimize_descriptor_encoding, []]
+        pass_config["ttir.add_loop_aware_cse"] = [passes.ttir.add_loop_aware_cse, []]
+
+        if capability // 10 in [8, 9]:
+            pass_config["ttgpuir.add_fuse_nested_loops"] = [passes.ttgpuir.add_fuse_nested_loops, []]
+            pass_config["common.add_canonicalizer"] = [passes.common.add_canonicalizer, []]
+            pass_config["ttir.add_triton_licm"] = [passes.ttir.add_triton_licm, []]
+            pass_config["common.add_canonicalizer"] = [passes.common.add_canonicalizer, []]
+            pass_config["ttgpuir.add_combine_tensor_select_and_if"] = [passes.ttgpuir.add_combine_tensor_select_and_if, []]
+            pass_config["nvidia.hopper.add_hopper_warpspec"] = [nvidia.passes.hopper.add_hopper_warpspec, [num_stages, dump_enabled]]
+            pass_config["ttgpuir.add_assign_latencies"] = [passes.ttgpuir.add_assign_latencies, [num_stages]]
+            pass_config["ttgpuir.add_schedule_loops"] = [passes.ttgpuir.add_schedule_loops, []]
+            pass_config["ttgpuir.add_pipeline"] = [passes.ttgpuir.add_pipeline, [num_stages, dump_enabled]]
+        elif capability // 10 >= 10:
+            pass_config["ttgpuir.add_fuse_nested_loops"] = [passes.ttgpuir.add_fuse_nested_loops, []]
+            pass_config["common.add_canonicalizer"] = [passes.common.add_canonicalizer, []]
+            pass_config["ttir.add_triton_licm"] = [passes.ttir.add_triton_licm, []]
+            pass_config["ttgpuir.add_optimize_accumulator_init"] = [passes.ttgpuir.add_optimize_accumulator_init, []]
+            pass_config["ttgpuir.add_hoist_tmem_alloc"] = [passes.ttgpuir.add_hoist_tmem_alloc, [False]]
+            pass_config["ttnvgpuir.add_promote_lhs_to_tmem"] = [nvidia.passes.ttnvgpuir.add_promote_lhs_to_tmem, []]
+            pass_config["ttgpuir.add_assign_latencies"] = [passes.ttgpuir.add_assign_latencies, [num_stages]]
+            pass_config["ttgpuir.add_schedule_loops"] = [passes.ttgpuir.add_schedule_loops, []]
+            pass_config["ttgpuir.add_warp_specialize"] = [passes.ttgpuir.add_warp_specialize, [num_stages]]
+            pass_config["ttgpuir.add_pipeline"] = [passes.ttgpuir.add_pipeline, [num_stages, dump_enabled]]
+            pass_config["ttgpuir.add_combine_tensor_select_and_if"] = [passes.ttgpuir.add_combine_tensor_select_and_if, []]
+            # hoist again and allow hoisting out of if statements
+            pass_config["ttgpuir.add_hoist_tmem_alloc"] = [passes.ttgpuir.add_hoist_tmem_alloc, [True]]
+            pass_config["ttnvgpuir.add_remove_tmem_tokens"] = [nvidia.passes.ttnvgpuir.add_remove_tmem_tokens, []]
+        else:
+            pass_config["ttir.add_triton_licm"] = [passes.ttir.add_triton_licm, []]
+        pass_config["common.add_canonicalizer"] = [passes.common.add_canonicalizer, []]
+        pass_config["ttir.add_loop_aware_cse"] = [passes.ttir.add_loop_aware_cse, []]
+        pass_config["ttgpuir.add_prefetch"] = [passes.ttgpuir.add_prefetch, []]
+        pass_config["ttgpuir.add_optimize_dot_operands"] = [passes.ttgpuir.add_optimize_dot_operands, [capability >= 80]]
+        pass_config["ttgpuir.add_coalesce_async_copy"] = [passes.ttgpuir.add_coalesce_async_copy, []]
+        pass_config["ttnvgpuir.add_optimize_tmem_layouts"] = [nvidia.passes.ttnvgpuir.add_optimize_tmem_layouts, []]
+        pass_config["ttgpuir.add_remove_layout_conversions"] = [passes.ttgpuir.add_remove_layout_conversions, []]
+        pass_config["ttnvgpuir.add_interleave_tmem"] = [nvidia.passes.ttnvgpuir.add_interleave_tmem, []]
+        pass_config["ttgpuir.add_reduce_data_duplication"] = [passes.ttgpuir.add_reduce_data_duplication, []]
+        pass_config["ttgpuir.add_reorder_instructions"] = [passes.ttgpuir.add_reorder_instructions, []]
+        pass_config["ttir.add_loop_aware_cse"] = [passes.ttir.add_loop_aware_cse, []]
+        pass_config["common.add_symbol_dce"] = [passes.common.add_symbol_dce, []]
+        if capability // 10 >= 9:
+            pass_config["ttnvgpuir.add_tma_lowering"] = [nvidia.passes.ttnvgpuir.add_tma_lowering, []]
+        pass_config["ttnvgpuir.add_fence_insertion"] = [nvidia.passes.ttnvgpuir.add_fence_insertion, [capability]]
+        pass_config["ttnvgpuir.add_lower_mma"] = [nvidia.passes.ttnvgpuir.add_lower_mma, []]
+        pass_config["common.add_sccp"] = [passes.common.add_sccp, []]
+        pass_config["common.add_canonicalizer"] = [passes.common.add_canonicalizer, []]
+
+        return [pass_config, cluster_info]
+
+    @staticmethod
+    def make_ttgir(mod, metadata, opt, capability, pass_config, global_config):
         # Set maxnreg on all kernels, if it was provided.
         if opt.maxnreg is not None:
             mod.set_attr("ttg.maxnreg", ir.builder(mod.context).get_int32_attr(opt.maxnreg))
-
-        cluster_info = nvidia.ClusterInfo()
-        if opt.cluster_dims is not None:
-            cluster_info.clusterDimX = opt.cluster_dims[0]
-            cluster_info.clusterDimY = opt.cluster_dims[1]
-            cluster_info.clusterDimZ = opt.cluster_dims[2]
         pm = ir.pass_manager(mod.context)
         dump_enabled = pm.enable_debug()
-        passes.ttir.add_convert_to_ttgpuir(pm, f"cuda:{capability}", opt.num_warps, 32, opt.num_ctas)
-        # optimize TTGIR
-        passes.ttgpuir.add_coalesce(pm)
-        if capability // 10 >= 8:
-            passes.ttgpuir.add_f32_dot_tc(pm)
-        # TODO(Qingyi): Move PlanCTAPass to the front of CoalescePass
-        nvidia.passes.ttnvgpuir.add_plan_cta(pm, cluster_info)
-        passes.ttgpuir.add_remove_layout_conversions(pm)
-        passes.ttgpuir.add_optimize_thread_locality(pm)
-        passes.ttgpuir.add_accelerate_matmul(pm)
-        passes.ttgpuir.add_remove_layout_conversions(pm)
-        passes.ttgpuir.add_optimize_dot_operands(pm, capability >= 80)
-        nvidia.passes.ttnvgpuir.add_optimize_descriptor_encoding(pm)
-        passes.ttir.add_loop_aware_cse(pm)
-        if capability // 10 in [8, 9]:
-            passes.ttgpuir.add_fuse_nested_loops(pm)
-            passes.common.add_canonicalizer(pm)
-            passes.ttir.add_triton_licm(pm)
-            passes.common.add_canonicalizer(pm)
-            passes.ttgpuir.add_combine_tensor_select_and_if(pm)
-            nvidia.passes.hopper.add_hopper_warpspec(pm, opt.num_stages, dump_enabled)
-            passes.ttgpuir.add_assign_latencies(pm, opt.num_stages)
-            passes.ttgpuir.add_schedule_loops(pm)
-            passes.ttgpuir.add_pipeline(pm, opt.num_stages, dump_enabled)
-        elif capability // 10 >= 10:
-            passes.ttgpuir.add_fuse_nested_loops(pm)
-            passes.common.add_canonicalizer(pm)
-            passes.ttir.add_triton_licm(pm)
-            passes.ttgpuir.add_optimize_accumulator_init(pm)
-            passes.ttgpuir.add_hoist_tmem_alloc(pm, False)
-            nvidia.passes.ttnvgpuir.add_promote_lhs_to_tmem(pm)
-            passes.ttgpuir.add_assign_latencies(pm, opt.num_stages)
-            passes.ttgpuir.add_schedule_loops(pm)
-            passes.ttgpuir.add_warp_specialize(pm, opt.num_stages)
-            passes.ttgpuir.add_pipeline(pm, opt.num_stages, dump_enabled)
-            passes.ttgpuir.add_combine_tensor_select_and_if(pm)
-            # hoist again and allow hoisting out of if statements
-            passes.ttgpuir.add_hoist_tmem_alloc(pm, True)
-            nvidia.passes.ttnvgpuir.add_remove_tmem_tokens(pm)
+
+        pass_entries = pass_config[0]
+        config_pass_entries = global_config["ttgir"]["passes"]
+        cluster_info = pass_config[1]
+
+        new_pass_entries = dict()
+        if(global_config == None):
+            new_pass_entries = pass_entries
         else:
-            passes.ttir.add_triton_licm(pm)
-        passes.common.add_canonicalizer(pm)
-        passes.ttir.add_loop_aware_cse(pm)
-        passes.ttgpuir.add_prefetch(pm)
-        passes.ttgpuir.add_optimize_dot_operands(pm, capability >= 80)
-        passes.ttgpuir.add_coalesce_async_copy(pm)
-        nvidia.passes.ttnvgpuir.add_optimize_tmem_layouts(pm)
-        passes.ttgpuir.add_remove_layout_conversions(pm)
-        nvidia.passes.ttnvgpuir.add_interleave_tmem(pm)
-        passes.ttgpuir.add_reduce_data_duplication(pm)
-        passes.ttgpuir.add_reorder_instructions(pm)
-        passes.ttir.add_loop_aware_cse(pm)
-        passes.common.add_symbol_dce(pm)
-        if capability // 10 >= 9:
-            nvidia.passes.ttnvgpuir.add_tma_lowering(pm)
-        nvidia.passes.ttnvgpuir.add_fence_insertion(pm, capability)
-        nvidia.passes.ttnvgpuir.add_lower_mma(pm)
-        passes.common.add_sccp(pm)
-        passes.common.add_canonicalizer(pm)
+            for e in config_pass_entries:
+                if(e in list(pass_entries.keys())):
+                    new_pass_entries[e] = [pass_entries[e][0], pass_entries[e][1]]
+
+        for e in new_pass_entries.values():
+            p = e[0]
+            args = e[1]
+            if len(args) == 0:
+                p(pm)
+            elif len(args) == 1:
+                p(pm, args[0])
+            elif len(args) == 2:
+                p(pm, args[0], args[1])
+            elif len(args) == 3:
+                p(pm, args[0], args[1], args[2])
+            elif len(args) == 4:
+                p(pm, args[0], args[1], args[2], args[3])
+            else:
+                raise Exception("Bad Arg Count")
+
         pm.run(mod)
         metadata["cluster_dims"] = (cluster_info.clusterDimX, cluster_info.clusterDimY, cluster_info.clusterDimZ)
         tensordesc_meta = mod.get_tensordesc_metadata()
@@ -480,10 +518,17 @@ please share the reproducer above with Triton project.
         return cubin
 
     def add_stages(self, stages, options, language):
+        global_config = None
+        if os.path.isfile("default.config") and os.access("default.config", os.R_OK):
+            with open("default.config", "r") as f:
+                global_config = json.load(f)
+        # if global_config is not None:
+        #     print(global_config["ttgir"]["passes"])
         capability = self._parse_arch(options.arch)
         if language == Language.TRITON:
+            ttgir_pass_config = self.make_ttgir_pass_config(options.num_warps, options.num_ctas, options.num_stages, capability, options.cluster_dims, dump_enabled=False)
             stages["ttir"] = lambda src, metadata: self.make_ttir(src, metadata, options, capability)
-            stages["ttgir"] = lambda src, metadata: self.make_ttgir(src, metadata, options, capability)
+            stages["ttgir"] = lambda src, metadata: self.make_ttgir(src, metadata, options, capability, ttgir_pass_config, global_config)
         elif language == Language.GLUON:
             stages["ttgir"] = lambda src, metadata: self.gluon_to_ttgir(src, metadata, options, capability)
         stages["llir"] = lambda src, metadata: self.make_llir(src, metadata, options, capability)
