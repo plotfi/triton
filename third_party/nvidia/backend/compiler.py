@@ -231,7 +231,7 @@ class CUDABackend(BaseBackend):
         passes.common.add_cse(pm)
         passes.common.add_symbol_dce(pm)
         passes.ttir.add_loop_unroll(pm)
-        pm.run(mod)
+        pm.run(mod, '.make_ttir.repro.mlir')
         return mod
 
     @staticmethod
@@ -343,7 +343,7 @@ class CUDABackend(BaseBackend):
             else:
                 raise Exception("Bad Arg Count")
 
-        pm.run(mod)
+        pm.run(mod, '.make_ttgir.repro.mlir')
         metadata["cluster_dims"] = (cluster_info.clusterDimX, cluster_info.clusterDimY, cluster_info.clusterDimZ)
         tensordesc_meta = mod.get_tensordesc_metadata()
         metadata["tensordesc_meta"] = tensordesc_meta
@@ -361,7 +361,7 @@ class CUDABackend(BaseBackend):
         passes.gluon.add_canonicalizer(pm)
         passes.ttgpuir.add_combine_tensor_select_and_if(pm)
 
-        pm.run(mod)
+        pm.run(mod, '.gluon_to_ttgir.repro.mlir')
         metadata["tensordesc_meta"] = mod.get_tensordesc_metadata()
         return mod
 
@@ -394,7 +394,7 @@ class CUDABackend(BaseBackend):
         passes.convert.add_nvvm_to_llvm(pm)
         if not knobs.compilation.disable_line_info:
             passes.llvmir.add_di_scope(pm)
-        pm.run(mod)
+        pm.run(mod, '.make_llir.repro.mlir')
         # LLVM-IR (MLIR) -> LLVM-IR (LLVM)
         llvm.init_targets()
         context = llvm.context()
