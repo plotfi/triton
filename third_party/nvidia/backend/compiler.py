@@ -89,6 +89,27 @@ def get_features(options, arch: int):
     features = f'+ptx{llvm_ptx_version}'
     return features
 
+# These functions are needed to override non-static methods
+class GPUInfo:
+    @staticmethod
+    def get_func(name: str):
+        return globals()[name]
+
+    @staticmethod
+    def get_ptx_version_from_options(options, arch: int):
+        return GPUInfo.get_func("get_ptx_version_from_options")(options, arch)
+
+    @staticmethod
+    def get_backend_instrumentation():
+        return CUDABackend.instrumentation
+
+    @staticmethod
+    def sm_arch_from_capability(capability: int):
+        return GPUInfo.get_func("sm_arch_from_capability")(capability)
+
+    @staticmethod
+    def get_features(options, arch: int):
+        return GPUInfo.get_func("get_features")(options, arch)
 
 @functools.lru_cache(None)
 def file_hash(path):
@@ -226,6 +247,10 @@ class CUDABackend(BaseBackend):
             CUDABackend.instrumentation.load_dialects(ctx)
 
     @staticmethod
+    def get_gpuinfo():
+        return GPUInfo()
+
+    @staticmethod
     def make_ttir(mod, metadata, opt, capability):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
@@ -339,7 +364,8 @@ class CUDABackend(BaseBackend):
         return mod
 
     def make_llir(self, src, metadata, options, capability):
-        ptx_version = get_ptx_version_from_options(options, self.target.arch)
+        gpuinfo = self.get_gpuinfo()
+        ptx_version = gpuinfo.get_ptx_version_from_options(options, self.target.arch)
 
         mod = src
         # TritonGPU -> LLVM-IR (MLIR)
@@ -358,8 +384,12 @@ class CUDABackend(BaseBackend):
         passes.ttgpuir.add_allocate_global_scratch_memory(pm)
         nvidia.passes.ttnvgpuir.add_proxy_fence_insertion(pm, capability)
         # instrumentation point here so we can override IRs above (e.g., ttir and ttgir)
-        if CUDABackend.instrumentation:
-            CUDABackend.instrumentation.patch("ttgpuir_to_llvmir", pm, mod.context)
+        # INSTRUMENTATION_PATCH_POINT: ttgpuir_to_llvmir
+
+        # REMOVE:
+        # if gpuinfo.get_backend_instrumentation():
+        #     gpuinfo.get_backend_instrumentation().patch("ttgpuir_to_llvmir", pm, mod.context)
+
         nvidia.passes.ttgpuir.add_to_llvmir(pm, capability, ptx_version)
         passes.common.add_canonicalizer(pm)
         passes.common.add_cse(pm)
@@ -373,8 +403,11 @@ class CUDABackend(BaseBackend):
         if not knobs.compilation.disable_line_info and not knobs.compilation.dump_ir_extract_di_local_variables:
             passes.llvmir.add_di_scope(pm)
 
-        if CUDABackend.instrumentation:
-            CUDABackend.instrumentation.patch("llvmir_to_llvm", pm, mod.context)
+        # INSTRUMENTATION_PATCH_POINT: llvmir_to_llvm
+
+        # REMOVE:
+        # if gpuinfo.get_backend_instrumentation():
+        #     gpuinfo.get_backend_instrumentation().patch("llvmir_to_llvm", pm, mod.context)
 
         pm.run(mod, 'make_llir')
 
@@ -403,8 +436,8 @@ class CUDABackend(BaseBackend):
             raise RuntimeError(
                 "Address Sanitizer Error: Address sanitizer is currently only supported on the AMD backend")
         llvm_mod = llvm.to_module(mod, context)
-        proc = sm_arch_from_capability(capability)
-        features = get_features(options, self.target.arch)
+        proc = gpuinfo.sm_arch_from_capability(capability)
+        features = gpuinfo.get_features(options, self.target.arch)
         triple = 'nvptx64-nvidia-cuda'
         nvidia.set_short_ptr()
         llvm.attach_datalayout(llvm_mod, triple, proc, features)

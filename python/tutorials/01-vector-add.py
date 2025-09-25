@@ -26,6 +26,45 @@ import triton.language as tl
 DEVICE = triton.runtime.driver.active.get_active_torch_device()
 
 
+import inspect
+import types
+
+def iter_source_lines(obj):
+    """Yield (filename, lineno, text) for each source line of obj."""
+    obj = getattr(obj, "__wrapped__", obj)  # unwrap decorated funcs
+    try:
+        filename = inspect.getsourcefile(obj) or inspect.getfile(obj)
+        lines, start = inspect.getsourcelines(obj)
+    except (OSError, TypeError):  # builtins, C-extensions, dynamic code, etc.
+        return
+    for offset, line in enumerate(lines):
+        yield filename, start + offset, line.rstrip("\n")
+
+def inspect_stages(self, stages, options, language, capability):
+    new_source = "# This is generated from Triton compiler.py"
+    new_source = new_source + '\n' + "from triton import knobs"
+    new_source = new_source + '\n' + "import triton.compiler"
+    new_source = new_source + '\n' + "from triton._C.libtriton import ir, passes, llvm, amd, nvidia"
+    new_source = new_source + '\n' + "class PassPipOverride:\n"
+    for _, _, txt in iter_source_lines(self.make_llir):
+        if "INSTRUMENTATION_PATCH_POINT" in txt:
+            if "ttgpuir_to_llvmir" in txt:
+                new_source = new_source + "        if gpuinfo.get_backend_instrumentation():\n"
+                new_source = new_source + "            gpuinfo.get_backend_instrumentation().patch(\"ttgpuir_to_llvmir\", pm, mod.context)\n"
+            if "llvmir_to_llvm" in txt:
+                new_source = new_source + "        if gpuinfo.get_backend_instrumentation():\n"
+                new_source = new_source + "            gpuinfo.get_backend_instrumentation().patch(\"llvmir_to_llvm\", pm, mod.context)\n"
+            continue
+        new_source += txt + '\n'
+    print("WILL RUN THE FOLLOWING FOR LLIR PASSES:\n")
+    print(new_source)
+
+    module = types.ModuleType("PassPipelineOverrideModule")
+    exec(new_source, module.__dict__)
+    stages["llir"] = lambda src, metadata: module.PassPipOverride.make_llir(self, src, metadata, options, capability)
+
+triton.knobs.runtime.add_stages_inspection_hook = inspect_stages
+
 @triton.jit
 def add_kernel(x_ptr,  # *Pointer* to first input vector.
                y_ptr,  # *Pointer* to second input vector.
