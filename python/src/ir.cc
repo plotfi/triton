@@ -41,6 +41,8 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SourceMgr.h"
 
+#include "triton/Tools/PluginUtils.h"
+
 namespace {
 
 namespace py = pybind11;
@@ -826,7 +828,7 @@ void init_triton_ir(py::module &&m) {
 
   py::class_<OpBuilder::InsertPoint>(m, "InsertPoint", py::module_local());
 
-  py::class_<TritonOpBuilder>(m, "builder", py::module_local(),
+  py::class_<TritonOpBuilder> TritonOpBuilderBinding = py::class_<TritonOpBuilder>(m, "builder", py::module_local(),
                               py::dynamic_attr())
       .def(py::init<MLIRContext *>())
       .def("get_op_builder", &TritonOpBuilder::getBuilder, ret::reference)
@@ -1254,6 +1256,11 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self, Value &lhs, Value &rhs) -> Value {
              return self.create<arith::AddFOp>(lhs, rhs);
            })
+      // .def("create_custom_fadd",
+      //      [](TritonOpBuilder &self, Value &lhs, Value &rhs) -> Value {
+      //        printf("Making custom op\n");
+      //        return self.create<arith::AddFOp>(lhs, rhs);
+      //      })
       .def("create_fsub",
            [](TritonOpBuilder &self, Value &lhs, Value &rhs) -> Value {
              return self.create<arith::SubFOp>(lhs, rhs);
@@ -1872,6 +1879,38 @@ void init_triton_ir(py::module &&m) {
                                                   tensorShape, isSignedInteger,
                                                   paddingOption);
            });
+  TritonOpBuilderBinding.def("create_custom_fadd",
+           [](TritonOpBuilder &self, Value &lhs, Value &rhs) -> Value {
+             printf("Making custom create_custom_fadd op\n");
+             std::string op = "arith::AddFOp";
+
+             return self.create<arith::AddFOp>(lhs, rhs);
+           });
+
+  std::string filename =
+      mlir::triton::tools::getStrEnv("TRITON_PASS_PLUGIN_PATH");
+  TritonPlugin TP(filename);
+  std::vector<const char *> customOpNames;
+  if (auto result = TP.getCustomOpHandles(customOpNames); !result)
+    throw TP.err2exp(result.takeError());
+
+  for (unsigned i = 0; i < customOpNames.size(); ++i) {
+    const char *customOpName = customOpNames.data()[i];
+
+    TritonOpBuilderBinding.def(
+    customOpName,
+    [customOpName](TritonOpBuilder &self, Value &lhs, Value &rhs) -> Value {
+      std::string filename =
+          mlir::triton::tools::getStrEnv("TRITON_PASS_PLUGIN_PATH");
+      TritonPlugin TP(filename);
+
+      std::vector<::mlir::Value> values = {lhs, rhs};
+      auto result = TP.invokeCustomOp(values, customOpName);
+      if (!result)
+        throw TP.err2exp(result.takeError());
+      return *result;
+    });
+  }
 
   py::class_<PassManager>(m, "pass_manager", py::module_local())
       .def(py::init<MLIRContext *>())
