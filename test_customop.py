@@ -49,7 +49,7 @@ def custom_add(x, y, sanitize_overflow: tl.constexpr = True, _semantic=None):
     x = _unwrap_if_constexpr(x)
     y = _unwrap_if_constexpr(y)
     builder = _semantic.getBuilder()
-    return tl.tensor(builder.create_custom_fadd(x.handle, y.handle), x.type)
+    return tl.tensor(builder.create_custom_fadd2(x.handle, y.handle), x.type)
 
 DEVICE = triton.runtime.driver.active.get_active_torch_device()
 

@@ -41,6 +41,8 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SourceMgr.h"
 
+#include "triton/Tools/PluginUtils.h"
+
 namespace {
 
 namespace py = pybind11;
@@ -1887,6 +1889,36 @@ void init_triton_ir(py::module &&m) {
 
              return self.create<arith::AddFOp>(lhs, rhs);
            });
+
+  if (std::string filename =
+      mlir::triton::tools::getStrEnv("TRITON_PASS_PLUGIN_PATH");
+      !filename.empty()) {
+    TritonPlugin TP(filename);
+    std::vector<const char *> customOpNames;
+    if (auto result = TP.getCustomOpHandles(customOpNames); !result)
+      throw TP.err2exp(result.takeError());
+
+    for (unsigned i = 0; i < customOpNames.size(); ++i) {
+      const char *customOpName = customOpNames.data()[i];
+
+      TritonOpBuilderBinding.def(
+          customOpName,
+          [customOpName](TritonOpBuilder &self, Value &lhs,
+                         Value &rhs) -> Value {
+            std::string filename =
+                mlir::triton::tools::getStrEnv("TRITON_PASS_PLUGIN_PATH");
+            TritonPlugin TP(filename);
+
+            ::mlir::Value dst;
+            std::vector<::mlir::Value> values = {dst, lhs, rhs};
+            auto result = TP.addCustomOp(customOpName, self, values);
+            if (!result)
+              throw TP.err2exp(result.takeError());
+            dst = values[0];
+            return dst;
+          });
+    }
+  }
 
   py::class_<PassManager>(m, "pass_manager", py::module_local())
       .def(py::init<MLIRContext *>())
