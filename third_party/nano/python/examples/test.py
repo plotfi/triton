@@ -11,6 +11,10 @@ def kernel_add(a, b, c):
 k = triton.compile(
     triton.compiler.ASTSource(fn=kernel_add, signature={"a": "*fp32", "b": "*fp32", "c": "*fp32"}, constexprs={}),
     target=GPUTarget("nano", "gfx942", 64))
-ptx = k.asm["ttir"]
+ttir = k.asm["ttir"]
+ttgir = k.asm["ttgir"]
+llir = k.asm["llir"]
 
-
+print(f'TTIR:\n\n{ttir}\n\n')
+print(f'TTGIR:\n\n{ttgir}\n\n')
+print(f'LLIR:\n\n{llir}\n\n')
