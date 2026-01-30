@@ -50,15 +50,6 @@ void init_triton_nano_passes_ttgpuir(py::module &&m) {
         [](mlir::PassManager &pm, const std::string &arch, bool ftz) {
           pm.addPass(createConvertTritonNANOGPUToLLVMPass(arch, ftz));
         });
-  m.def("insert_instruction_sched_hints", [](mlir::PassManager &pm,
-                                             const std::string &variant) {
-    pm.addPass(createTritonNANOGPUInsertInstructionSchedHintsPass(variant));
-  });
-  m.def("lower_instruction_sched_hints",
-        [](mlir::PassManager &pm, const std::string &arch, int32_t numStages) {
-          pm.addPass(createTritonNANOGPULowerInstructionSchedHintsPass(
-              arch, numStages));
-        });
   ADD_PASS_WRAPPER_0("add_allocate_shared_memory",
                      mlir::triton::createAllocateNANOGPUSharedMemory);
 }

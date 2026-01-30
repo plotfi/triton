@@ -7,7 +7,6 @@ void populateTritonNANOGPUToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                         const NANO::TargetInfo &targetInfo,
                                         PatternBenefit benefit) {
   populateExtractSliceOpToLLVMPatterns(typeConverter, patterns, benefit);
-  populateInThreadTransposeOpToTTGPatterns(patterns, benefit);
   populateConcatOpToLLVMPatterns(typeConverter, patterns, benefit);
   populateScaledUpcastOpToLLVMPatterns(typeConverter, patterns, targetInfo,
                                        benefit);

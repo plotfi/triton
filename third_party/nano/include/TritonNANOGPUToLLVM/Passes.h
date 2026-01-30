@@ -25,7 +25,6 @@ namespace mlir::triton {
 
 namespace mlir::triton::NANO {
 
-std::unique_ptr<OperationPass<ModuleOp>> createConvertWarpPipelinePass();
 void runScalarizePackedFOpsPass(llvm::Function &F);
 
 } // namespace mlir::triton::NANO
@@ -34,11 +33,6 @@ namespace mlir::triton {
 
 std::unique_ptr<OperationPass<ModuleOp>>
 createConvertTritonNANOGPUToLLVMPass(StringRef targetArch, bool ftz);
-std::unique_ptr<OperationPass<ModuleOp>>
-createTritonNANOGPUInsertInstructionSchedHintsPass(StringRef variant);
-std::unique_ptr<OperationPass<ModuleOp>>
-createTritonNANOGPULowerInstructionSchedHintsPass(StringRef arch,
-                                                 int32_t numStages);
 
 #define GEN_PASS_REGISTRATION
 #include "TritonNANOGPUToLLVM/Passes.h.inc"

@@ -142,28 +142,15 @@ class NanoBackend(BaseBackend):
         passes.ttgpuir.add_optimize_thread_locality(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
 
-        # Simplified pipeline - skip matmul-specific optimizations
-        # nano.passes.ttgpuir.add_optimize_epilogue(pm)
-        # nano.passes.ttgpuir.add_hoist_layout_conversions(pm)
-        # nano.passes.ttgpuir.add_sink_layout_conversions(pm)
-
         passes.ttgpuir.add_fuse_nested_loops(pm)
         passes.common.add_canonicalizer(pm)
         passes.ttir.add_triton_licm(pm)
         passes.common.add_canonicalizer(pm)
-
-        # Simplified pipeline stages
-        #nano.passes.ttgpuir.add_schedule_loops(pm, options.num_stages)
-        #nano.passes.ttgpuir.add_pipeline(pm, False, False)
-        # nano.passes.ttgpuir.add_convert_to_tensor_ops(pm)
         passes.common.add_canonicalizer(pm)
 
         passes.ttgpuir.add_remove_layout_conversions(pm)
         passes.ttgpuir.add_reduce_data_duplication(pm)
-        # nano.passes.ttgpuir.add_reorder_instructions(pm)
 
-        # nano.passes.ttgpuir.add_fold_true_cmpi(pm)
-        # nano.passes.ttgpuir.add_prepare_if_combining(pm)
         passes.common.add_canonicalizer(pm)
         passes.common.add_cse(pm)
         passes.common.add_symbol_dce(pm)
@@ -177,8 +164,6 @@ class NanoBackend(BaseBackend):
         mod = src
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
-        # nano.passes.ttgpuir.add_update_async_wait_count(pm, options.arch)
-        # nano.passes.ttgpuir.add_warp_pipeline_conversion(pm)
         passes.convert.add_scf_to_cf(pm)
         passes.gluon.add_inliner(pm)
         passes.convert.add_index_to_llvmir(pm)
@@ -199,7 +184,6 @@ class NanoBackend(BaseBackend):
         if not knobs.compilation.disable_line_info:
             passes.llvmir.add_di_scope(pm)
 
-        # nano.passes.ttgpuir.add_builtin_func_to_llvmir(pm, __NANO_FTZ)
         pm.run(mod, 'make_llir')
 
         # LLVM-IR (MLIR) -> LLVM-IR (LLVM)

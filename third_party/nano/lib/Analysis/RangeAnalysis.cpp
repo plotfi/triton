@@ -793,35 +793,6 @@ TritonIntegerRangeAnalysis::collectAssumptions(Operation *rootOp,
   return assumptions;
 }
 
-struct FoldTrueCmpIOp : OpRewritePattern<arith::CmpIOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  FoldTrueCmpIOp(MLIRContext *context, DataFlowSolver *solver)
-      : OpRewritePattern(context), solver(solver) {};
-
-  LogicalResult matchAndRewrite(arith::CmpIOp cmpOp,
-                                PatternRewriter &rewriter) const override {
-    if (llvm::isa<IntegerType, IndexType>(cmpOp.getType()) &&
-        cmpIIsStaticallyTrue(*solver, cmpOp)) {
-      if (failed(mlir::dataflow::maybeReplaceWithConstant(*solver, rewriter,
-                                                          cmpOp.getResult()))) {
-        LDBG("failed to replace with constant op: " << cmpOp);
-        return failure();
-      }
-    } else {
-      return failure();
-    }
-    return success();
-  }
-
-  DataFlowSolver *solver;
-};
-
-void populateFoldTrueCmpIOpPatterns(RewritePatternSet &patterns,
-                                    DataFlowSolver *solver) {
-  patterns.add<FoldTrueCmpIOp>(patterns.getContext(), solver);
-}
-
 void initializeFuncOps(Operation *op,
                        NANO::TritonIntegerRangeAnalysis *rangeAnalysis) {
   op->walk<WalkOrder::PreOrder>([&rangeAnalysis](FuncOp funcOp) {
