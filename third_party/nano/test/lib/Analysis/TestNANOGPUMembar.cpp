@@ -1,0 +1,39 @@
+#include "TritonNANOGPUToLLVM/MembarUtility.h"
+#include "nano/lib/TritonNANOGPUToLLVM/AsyncUtility.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/Transforms/DialectConversion.h"
+#include "triton/Analysis/Allocation.h"
+#include "triton/Analysis/Membar.h"
+
+using namespace mlir;
+
+namespace {
+
+struct TestNANOGPUMembarPass
+    : public PassWrapper<TestNANOGPUMembarPass, OperationPass<ModuleOp>> {
+
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(TestNANOGPUMembarPass);
+
+  StringRef getArgument() const final { return "test-tritonamdgpu-membar"; }
+  StringRef getDescription() const final {
+    return "print the result of the membar analysis as run in the amdgpu "
+           "backend";
+  }
+
+  void runOnOperation() override {
+    ModuleOp moduleOp = getOperation();
+    triton::NANO::annotateLocalLoadsSyncedViaAsyncWait(moduleOp);
+    // Print all ops after membar pass
+    ModuleAllocation allocation(moduleOp);
+    ModuleMembarAnalysis membarPass(&allocation, triton::NANO::membarFilter);
+    membarPass.run();
+  }
+};
+
+} // namespace
+
+namespace mlir::test {
+void registerTestNANOGPUMembarPass() {
+  PassRegistration<TestNANOGPUMembarPass>();
+}
+} // namespace mlir::test
