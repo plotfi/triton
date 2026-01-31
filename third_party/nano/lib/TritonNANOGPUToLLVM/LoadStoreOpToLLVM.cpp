@@ -2,7 +2,6 @@
 #include "AtomicRMWOpsEmitter.h"
 #include "Dialect/TritonNANOGPU/IR/Dialect.h"
 #include "PatternTritonGPUOpToLLVM.h"
-#include "TDMUtility.h"
 #include "TargetInfo.h"
 #include "Utility.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
@@ -920,240 +919,6 @@ struct AsyncCopyLocalToGlobalOpConversion
   }
 };
 
-struct AsyncTDMCopyGlobalToLocalOpConversion
-    : public ConvertOpToLLVMPattern<
-          triton::nanogpu::AsyncTDMCopyGlobalToLocalOp>,
-      public LoadStoreConversionBase {
-  AsyncTDMCopyGlobalToLocalOpConversion(
-      LLVMTypeConverter &converter, const NANO::TargetInfo &targetInfo,
-      ModuleAxisInfoAnalysis &axisAnalysisPass, PatternBenefit benefit)
-      : ConvertOpToLLVMPattern(converter, benefit),
-        LoadStoreConversionBase(targetInfo, axisAnalysisPass) {}
-
-  LogicalResult
-  matchAndRewrite(triton::nanogpu::AsyncTDMCopyGlobalToLocalOp op,
-                  OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto ctx = rewriter.getContext();
-    auto loc = op.getLoc();
-    auto b = TritonLLVMOpBuilder(loc, rewriter);
-
-    auto tensorDescTy = op.getDesc().getType();
-    auto smemTy = op.getResult().getType();
-    auto paddedEnc =
-        llvm::dyn_cast<PaddedSharedEncodingAttr>(smemTy.getEncoding());
-    Type elementType = getTypeConverter()->convertType(smemTy.getElementType());
-
-    triton::LinearLayout sharedLayout;
-    unsigned padInterval = 0;
-    unsigned padAmount = 0;
-    if (paddedEnc) {
-      assert(paddedEnc.getIntervals().size() == 1 &&
-             paddedEnc.getPaddings().size() == 1);
-      sharedLayout = paddedEnc.getLinearComponent();
-      padInterval = paddedEnc.getIntervals()[0];
-      padAmount = paddedEnc.getPaddings()[0];
-    } else {
-      sharedLayout = triton::gpu::toLinearLayout(smemTy);
-    }
-    Value multicastMask;
-    if (targetInfo.supportsMultiCTALaunch()) {
-      multicastMask = LLVM::NANO::emitCtaMulticastMask(
-          rewriter, loc, targetInfo.getClusterCTAId(rewriter, loc),
-          sharedLayout);
-    }
-
-    SmallVector<Value> desc =
-        unpackLLElements(loc, adaptor.getDesc(), rewriter);
-
-    SmallVector<int64_t> blockShape =
-        llvm::to_vector(tensorDescTy.getBlockType().getShape());
-
-    // 2D tensors: 12 dwords (group0: 4, group1: 8)
-    // 3D-5D tensors: 20 dwords (group0: 4, group1: 8, group2: 4, group3: 4)
-    assert((blockShape.size() <= 2 && desc.size() == 12) ||
-           (blockShape.size() > 2 && desc.size() == 20));
-
-    auto dstMemObj = LLVM::getSharedMemoryObjectFromStruct(
-        loc, adaptor.getResult(), elementType, rewriter);
-    Value dstPtr = dstMemObj.getBase();
-    SmallVector<Value> offset = adaptor.getIndices();
-    int numWarps = triton::gpu::lookupNumWarps(op);
-
-    Value barrierPtr = nullptr;
-    if (op.getBarrier()) {
-      auto smemObj = LLVM::getSharedMemoryObjectFromStruct(
-          loc, adaptor.getBarrier(),
-          typeConverter->convertType(
-              op.getBarrier().getType().getElementType()),
-          rewriter);
-      barrierPtr = smemObj.getBase();
-    }
-
-    auto kBlock = rewriter.getStringAttr("block");
-    auto cgaLayout = sharedLayout.sublayout(
-        {kBlock}, to_vector(sharedLayout.getOutDimNames()));
-    auto ctaId = targetInfo.getClusterCTAId(rewriter, loc);
-
-    auto shapePerCTA = triton::gpu::getShapePerCTA(smemTy);
-    mlir::LLVM::NANO::emitTDMLoadStore(
-        rewriter, loc, getTypeConverter(), desc, shapePerCTA, numWarps,
-        padInterval, padAmount, offset, dstPtr, op.getPred(), multicastMask,
-        elementType, barrierPtr, /*isLoad=*/true, cgaLayout, ctaId);
-
-    rewriter.eraseOp(op);
-    return success();
-  }
-};
-
-struct AsyncTDMCopyLocalToGlobalOpConversion
-    : public ConvertOpToLLVMPattern<
-          triton::nanogpu::AsyncTDMCopyLocalToGlobalOp>,
-      public LoadStoreConversionBase {
-  AsyncTDMCopyLocalToGlobalOpConversion(
-      LLVMTypeConverter &converter, const NANO::TargetInfo &targetInfo,
-      ModuleAxisInfoAnalysis &axisAnalysisPass, PatternBenefit benefit)
-      : ConvertOpToLLVMPattern(converter, benefit),
-        LoadStoreConversionBase(targetInfo, axisAnalysisPass) {}
-
-  LogicalResult
-  matchAndRewrite(triton::nanogpu::AsyncTDMCopyLocalToGlobalOp op,
-                  OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto ctx = rewriter.getContext();
-    auto loc = op.getLoc();
-    auto b = TritonLLVMOpBuilder(loc, rewriter);
-
-    auto tensorDescTy = op.getDesc().getType();
-    auto smemTy = op.getSrc().getType();
-    Type elementType = getTypeConverter()->convertType(smemTy.getElementType());
-
-    SmallVector<Value> desc =
-        unpackLLElements(loc, adaptor.getDesc(), rewriter);
-
-    SmallVector<int64_t> blockShape =
-        llvm::to_vector(tensorDescTy.getBlockType().getShape());
-
-    // 2D tensors: 12 dwords (group0: 4, group1: 8)
-    // 3D-5D tensors: 20 dwords (group0: 4, group1: 8, group2: 4, group3: 4)
-    assert((blockShape.size() <= 2 && desc.size() == 12) ||
-           (blockShape.size() > 2 && desc.size() == 20));
-
-    auto dstMemObj = LLVM::getSharedMemoryObjectFromStruct(
-        loc, adaptor.getSrc(), elementType, rewriter);
-    Value dstPtr = dstMemObj.getBase();
-    SmallVector<Value> offset = adaptor.getIndices();
-    int numWarps = triton::gpu::lookupNumWarps(op);
-
-    Value barrierPtr = nullptr;
-    if (op.getBarrier()) {
-      auto smemObj = LLVM::getSharedMemoryObjectFromStruct(
-          loc, adaptor.getBarrier(),
-          typeConverter->convertType(
-              op.getBarrier().getType().getElementType()),
-          rewriter);
-      barrierPtr = smemObj.getBase();
-    }
-
-    // Verifier ensures smem is not usind a PaddedSharedEncodingAttr
-    auto sharedLayout = triton::gpu::toLinearLayout(smemTy);
-    auto kBlock = rewriter.getStringAttr("block");
-    auto cgaLayout = sharedLayout.sublayout(
-        {kBlock}, to_vector(sharedLayout.getOutDimNames()));
-    auto ctaId = targetInfo.getClusterCTAId(rewriter, loc);
-
-    auto shapePerCTA = triton::gpu::getShapePerCTA(smemTy);
-    Value pred = arith::ConstantIntOp::create(rewriter, loc, 1, 32);
-    mlir::LLVM::NANO::emitTDMLoadStore(
-        rewriter, loc, getTypeConverter(), desc, shapePerCTA, numWarps,
-        /*padInterval=*/0, /*padAmount=*/0, offset, dstPtr, pred,
-        /*multicastMask=*/{}, elementType, barrierPtr,
-        /*isLoad=*/false, cgaLayout, ctaId);
-
-    rewriter.eraseOp(op);
-    return success();
-  }
-};
-
-struct AsyncTDMScatterOpConversion
-    : public ConvertOpToLLVMPattern<triton::nanogpu::AsyncTDMScatterOp>,
-      public LoadStoreConversionBase {
-  AsyncTDMScatterOpConversion(LLVMTypeConverter &converter,
-                              const NANO::TargetInfo &targetInfo,
-                              ModuleAxisInfoAnalysis &axisAnalysisPass,
-                              PatternBenefit benefit)
-      : ConvertOpToLLVMPattern(converter, benefit),
-        LoadStoreConversionBase(targetInfo, axisAnalysisPass) {}
-
-  LogicalResult
-  matchAndRewrite(triton::nanogpu::AsyncTDMScatterOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-    auto b = TritonLLVMOpBuilder(loc, rewriter);
-
-    auto tensorDescTy = op.getDesc().getType();
-    auto smemTy = op.getSrc().getType();
-    Type elementType = getTypeConverter()->convertType(smemTy.getElementType());
-
-    SmallVector<Value> desc =
-        unpackLLElements(loc, adaptor.getDesc(), rewriter);
-
-    SmallVector<int64_t> blockShape =
-        llvm::to_vector(tensorDescTy.getBlockType().getShape());
-
-    // Scatter only supports 2D tensors
-    assert(blockShape.size() == 2 &&
-           "TDM scatter mode only supports 2D tensors");
-
-    auto srcMemObj = LLVM::getSharedMemoryObjectFromStruct(
-        loc, adaptor.getSrc(), elementType, rewriter);
-    Value srcPtr = srcMemObj.getBase();
-    int numWarps = triton::gpu::lookupNumWarps(op);
-
-    Value barrierPtr = nullptr;
-    if (op.getBarrier()) {
-      auto smemObj = LLVM::getSharedMemoryObjectFromStruct(
-          loc, adaptor.getBarrier(),
-          typeConverter->convertType(
-              op.getBarrier().getType().getElementType()),
-          rewriter);
-      barrierPtr = smemObj.getBase();
-    }
-
-    // Get the destination row indices for scatter
-    SmallVector<Value> dstRowIndices =
-        unpackLLElements(loc, adaptor.getDstRowIndices(), rewriter);
-
-    auto shapePerCTA = triton::gpu::getShapePerCTA(smemTy);
-
-    // Get the destination column offset
-    Value dstColOffset = adaptor.getDstColOffset();
-
-    // Determine index size from the element type of dst_row_indices
-    auto dstRowIndicesType =
-        cast<RankedTensorType>(op.getDstRowIndices().getType());
-    bool use32BitIndices =
-        dstRowIndicesType.getElementType().getIntOrFloatBitWidth() == 32;
-
-    // Create the CGA layout
-    auto sharedLayout = triton::gpu::toLinearLayout(smemTy);
-    auto kBlock = rewriter.getStringAttr("block");
-    auto cgaLayout = sharedLayout.sublayout(
-        {kBlock}, to_vector(sharedLayout.getOutDimNames()));
-    auto ctaId = targetInfo.getClusterCTAId(rewriter, loc);
-
-    // Predicate must be i32 (not i1) to match other elements in group0
-    Value pred = arith::ConstantIntOp::create(rewriter, loc, 1, 32);
-    mlir::LLVM::NANO::emitTDMScatter(rewriter, loc, getTypeConverter(), desc,
-                                    shapePerCTA, srcPtr, pred, elementType,
-                                    barrierPtr, cgaLayout, ctaId, dstRowIndices,
-                                    dstColOffset, use32BitIndices);
-
-    rewriter.eraseOp(op);
-    return success();
-  }
-};
-
 struct StoreOpConversion : public ConvertOpToLLVMPattern<triton::StoreOp>,
                            public LoadStoreConversionBase {
   StoreOpConversion(LLVMTypeConverter &converter,
@@ -1645,22 +1410,6 @@ private:
   const NANO::TargetInfo &targetInfo;
 };
 
-struct AsyncTDMWaitConversion
-    : public ConvertOpToLLVMPattern<triton::nanogpu::AsyncTDMWait> {
-  AsyncTDMWaitConversion(LLVMTypeConverter &converter, PatternBenefit benefit)
-      : ConvertOpToLLVMPattern(converter, benefit) {}
-
-  LogicalResult
-  matchAndRewrite(triton::nanogpu::AsyncTDMWait op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-    auto b = TritonLLVMOpBuilder(loc, rewriter);
-    ROCDL::WaitTensorcntOp::create(rewriter, loc, op.getNum());
-    rewriter.eraseOp(op);
-    return success();
-  }
-};
-
 struct AsyncCommitGroupOpConversion
     : public ConvertOpToLLVMPattern<AsyncCommitGroupOp> {
   using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
@@ -1696,62 +1445,6 @@ struct AsyncCopyMbarrierArriveOpConversion
     return success();
   }
 };
-
-struct TDMPrefetchConversion
-    : public ConvertOpToLLVMPattern<triton::nanogpu::TDMPrefetchOp> {
-  TDMPrefetchConversion(LLVMTypeConverter &converter,
-                        const NANO::TargetInfo &targetInfo,
-                        PatternBenefit benefit)
-      : ConvertOpToLLVMPattern(converter, benefit), targetInfo(targetInfo) {}
-  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
-
-  LogicalResult
-  matchAndRewrite(triton::nanogpu::TDMPrefetchOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-    auto b = TritonLLVMOpBuilder(loc, rewriter);
-
-    auto tdescType = op.getDesc().getType();
-    auto tensorType = tdescType.getBlockType();
-    SmallVector<int64_t> blockShape = llvm::to_vector(tensorType.getShape());
-    Type elementType =
-        getTypeConverter()->convertType(tensorType.getElementType());
-    SmallVector<Value> desc =
-        unpackLLElements(loc, adaptor.getDesc(), rewriter);
-    SmallVector<Value> offset = adaptor.getIndices();
-
-    auto mod = op->getParentOfType<ModuleOp>();
-    int threadsPerWarp = TritonGPUDialect::getThreadsPerWarp(mod);
-    int numWarps = lookupNumWarps(op);
-    int numCTAs = lookupNumCTAs(op);
-
-    auto [laneId, warpId] = getLaneAndWarpId(rewriter, loc);
-    auto ctaId = targetInfo.getClusterCTAId(rewriter, loc);
-
-    auto offsets = mlir::LLVM::NANO::emitTDMPrefetch(
-        rewriter, loc, desc, blockShape, threadsPerWarp, numWarps, numCTAs,
-        offset, op.getPred(), elementType, laneId, warpId, ctaId,
-        op.getSpeculative());
-
-    // If the op has no results, just erase it
-    if (op->getNumResults() == 0) {
-      rewriter.eraseOp(op);
-      return success();
-    }
-
-    // Return offsets
-    Type llvmResultStructTy = getTypeConverter()->convertType(op.getType(0));
-    auto structType = dyn_cast<LLVM::LLVMStructType>(
-        getTypeConverter()->convertType(op.getType(0)));
-    Value resultStruct = packLLElements(loc, getTypeConverter(), offsets,
-                                        rewriter, llvmResultStructTy);
-    rewriter.replaceOp(op, {resultStruct});
-    return success();
-  }
-
-private:
-  const NANO::TargetInfo &targetInfo;
-};
 } // namespace
 
 namespace mlir::triton::NANO {
@@ -1763,13 +1456,9 @@ void populateLoadStoreOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
   patterns.add<
       AtomicCASOpConversion, AtomicRMWOpConversion, LoadOpConversion,
       StoreOpConversion,
-      AsyncCopyGlobalToLocalOpConversion, AsyncCopyLocalToGlobalOpConversion,
-      AsyncTDMCopyGlobalToLocalOpConversion,
-      AsyncTDMCopyLocalToGlobalOpConversion, AsyncTDMScatterOpConversion>(
+      AsyncCopyGlobalToLocalOpConversion, AsyncCopyLocalToGlobalOpConversion>(
       typeConverter, targetInfo, axisInfoAnalysis, benefit);
   patterns.add<AsyncWaitOpConversion>(typeConverter, targetInfo, benefit);
-  patterns.add<TDMPrefetchConversion>(typeConverter, targetInfo, benefit);
-  patterns.add<AsyncTDMWaitConversion>(typeConverter, benefit);
   patterns.add<AsyncCommitGroupOpConversion>(typeConverter, benefit);
   patterns.add<AsyncCopyMbarrierArriveOpConversion>(typeConverter, benefit);
 }

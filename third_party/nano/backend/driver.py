@@ -4,7 +4,6 @@
 import functools
 import os
 import subprocess
-import re
 import triton
 from pathlib import Path
 from triton import knobs
@@ -15,7 +14,6 @@ from triton.runtime.build import compile_module_from_src
 
 dirname = os.path.dirname(os.path.realpath(__file__))
 include_dirs = [os.path.join(dirname, "include")]
-PyTDMDescriptor = None
 PyKernelArg = None
 ARG_CONSTEXPR = None
 ARG_KERNEL = None
@@ -157,15 +155,12 @@ class NanoUtils(object):
         mod = compile_module_from_src(src=src, name="nano_utils", include_dirs=include_dirs)
         self.load_binary = mod.load_binary
         self.get_device_properties = mod.get_device_properties
-        self.create_tdm_descriptor = mod.create_tdm_descriptor
         self.launch = mod.launch
         self.build_signature_metadata = mod.build_signature_metadata
-        global PyTDMDescriptor
         global PyKernelArg
         global ARG_CONSTEXPR
         global ARG_KERNEL
         global ARG_TUPLE
-        PyTDMDescriptor = mod.PyTDMDescriptor
         PyKernelArg = mod.PyKernelArg
         ARG_CONSTEXPR = mod.ARG_CONSTEXPR
         ARG_KERNEL = mod.ARG_KERNEL
@@ -176,8 +171,6 @@ class NanoUtils(object):
 def ty_to_cpp(ty):
     if ty.startswith('*'):
         return "hipDeviceptr_t"
-    if ty == "tensordesc":
-        return "TDMDescriptor"
     return {
         "i1": "int8_t",
         "i8": "int8_t",
@@ -197,35 +190,9 @@ def ty_to_cpp(ty):
     }[ty]
 
 
-def expand_signature(signature, tensordesc_meta):
-    output = []
-    tensordesc_idx = 0
-    for sig in signature:
-        if isinstance(sig, str) and sig.startswith("tensordesc"):
-            meta = tensordesc_meta[tensordesc_idx] if tensordesc_meta else None
-            tensordesc_idx += 1
-
-            match = re.match("tensordesc<([^[>]*)\\[([^]]*)\\]", sig)
-            dtype = match.group(1)
-            shape = match.group(2)
-            ndim = shape.count(",") + 1
-
-            if meta is None:
-                output.append("*" + dtype)
-                for _ in range(2 * ndim):
-                    output.append("i64")
-                output.append("i1")
-            else:
-                output.append("tensordesc")
-
-            for _ in range(ndim):
-                output.append("i32")
-            for _ in range(ndim):
-                output.append("i64")
-        else:
-            output.append(sig)
-
-    return output
+def expand_signature(signature):
+    """Expand signature (no-op for basic types)."""
+    return list(signature)
 
 
 def make_kernel_signature(signature):
@@ -259,67 +226,6 @@ def annotate_arguments(signature):
     return annotated_arguments
 
 
-def make_tensordesc_arg(arg, kernel_metadata, tensordesc_metadata):
-    """Translate tensor descriptor argument into kernel arguments."""
-
-    if tensordesc_metadata is None:
-        return [arg.base, *arg.shape, *arg.strides, arg.padding == "nan", *arg.shape, *arg.strides]
-
-    shape = arg.shape
-    strides = arg.strides
-    base = arg.base.data_ptr()
-
-    assert "elem_bits" in tensordesc_metadata and "block_size" in tensordesc_metadata
-    elem_bits = tensordesc_metadata["elem_bits"]
-    block_size = tensordesc_metadata["block_size"]
-    pad_interval, pad_amount = 0, 0
-    interval_padding_pairs = tensordesc_metadata.get("interval_padding_pairs", [])
-    if interval_padding_pairs:
-        assert len(interval_padding_pairs) == 1 and len(interval_padding_pairs[0]) == 2
-        pad_interval, pad_amount = interval_padding_pairs[0]
-    num_warps = kernel_metadata[0]
-
-    driver = triton.runtime.driver.active
-    assert isinstance(driver, NanoDriver)
-
-    desc = driver.utils.create_tdm_descriptor(elem_bits, block_size, num_warps, pad_interval, pad_amount, shape,
-                                              strides, base)
-
-    return [desc, *shape, *strides]
-
-
-def wrap_handle_tensordesc(launcher, signature, tensordesc_metadata):
-    """Wrap kernel launcher to handle tensor descriptor arguments."""
-
-    has_tensor_desc_arg = any(isinstance(sig, str) and sig.startswith("tensordesc") for sig in signature.values())
-    if not has_tensor_desc_arg:
-        return launcher
-
-    tensordesc_indices = set(
-        [i for i, sig in enumerate(signature.values()) if isinstance(sig, str) and sig.startswith("tensordesc")])
-    assert not tensordesc_metadata or len(tensordesc_metadata) == len(tensordesc_indices)
-    if not tensordesc_metadata:
-        tensordesc_metadata = [None] * len(tensordesc_indices)
-
-    def inner(*args):
-        base_args = args[:-1]
-        kernel_metadata = base_args[7]
-        kernel_args = args[-1]
-
-        final_kernel_args = []
-        tensordesc_idx = 0
-        for i, arg in enumerate(kernel_args):
-            if i in tensordesc_indices:
-                final_kernel_args.extend(make_tensordesc_arg(arg, kernel_metadata, tensordesc_metadata[tensordesc_idx]))
-                tensordesc_idx += 1
-            else:
-                final_kernel_args.append(arg)
-
-        return launcher(*base_args, final_kernel_args)
-
-    return inner
-
-
 class NanoLauncher(object):
     """Simplified kernel launcher for Nano backend."""
 
@@ -328,12 +234,10 @@ class NanoLauncher(object):
         arg_idx = lambda x: (src.fn.arg_names.index(x), ) if isinstance(x, str) else x
         constants = {arg_idx(idx): value for idx, value in constants.items()}
         signature = {idx: value for idx, value in src.signature.items()}
-        tensordesc_meta = getattr(metadata, "tensordesc_meta", None)
-        launcher = triton.runtime.driver.active.utils.launch
-        expanded_signature = expand_signature(signature.values(), tensordesc_meta)
+        self.launch = triton.runtime.driver.active.utils.launch
+        expanded_signature = expand_signature(signature.values())
         self.arg_annotations = annotate_arguments(expanded_signature)
         self.kernel_signature = make_kernel_signature(expanded_signature)
-        self.launch = wrap_handle_tensordesc(launcher, signature, tensordesc_meta)
         self.launch_cooperative_grid = metadata.launch_cooperative_grid
         self.warp_size = metadata.warp_size
         if self.launch_cooperative_grid:

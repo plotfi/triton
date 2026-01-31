@@ -56,7 +56,8 @@ class NanoOptions:
 
         default_libdir = Path(__file__).parent / 'lib'
         extern_libs = {} if self.extern_libs is None else dict(self.extern_libs)
-        for lib in ["ocml", "ockl"]:
+        # Only include ockl (device intrinsics), not ocml (math library)
+        for lib in ["ockl"]:
             extern_libs[lib] = str(default_libdir / f'{lib}.bc')
         object.__setattr__(self, 'extern_libs', tuple(extern_libs.items()))
 
@@ -101,8 +102,7 @@ class NanoBackend(BaseBackend):
         return {"min_dot_size": get_min_dot_size(self.target)}
 
     def get_module_map(self) -> Dict[str, ModuleType]:
-        from triton.language.extra.hip import libdevice
-        return {"triton.language.extra.libdevice": libdevice}
+        return {}
 
     def load_dialects(self, ctx):
         nano.load_dialects(ctx)
@@ -155,7 +155,6 @@ class NanoBackend(BaseBackend):
         passes.common.add_cse(pm)
         passes.common.add_symbol_dce(pm)
         pm.run(mod, 'make_ttgir')
-        metadata["tensordesc_meta"] = mod.get_tensordesc_metadata()
         return mod
 
     @staticmethod

@@ -40,7 +40,6 @@
 // clang-format on
 
 #include "third_party/nano/include/Dialect/TritonNANOGPU/Utility/CommonUtils.h"
-#include "third_party/nano/lib/TritonNANOGPUToLLVM/TDMUtility.h"
 
 using namespace mlir;
 using namespace mlir::triton::nanogpu;
