@@ -38,10 +38,6 @@ void populateTritonNANOGPUToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                         const NANO::TargetInfo &,
                                         PatternBenefit benefit);
 
-void populateTensorPtrOpsToLLVMPatterns(LLVMTypeConverter &typeConverter,
-                                        RewritePatternSet &patterns,
-                                        PatternBenefit benefit);
-
 void populateWarpIdOpToLLVMPattern(LLVMTypeConverter &typeConverter,
                                    const TargetInfo &targetInfo,
                                    RewritePatternSet &patterns,

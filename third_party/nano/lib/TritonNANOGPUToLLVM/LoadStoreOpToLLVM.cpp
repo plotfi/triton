@@ -1,4 +1,3 @@
-#include "AtomicRMWOpsEmitter.h"
 // TritonNANOGPU dialect removed - not needed for minimal nano backend
 #include "PatternTritonGPUOpToLLVM.h"
 #include "TargetInfo.h"
@@ -1034,210 +1033,7 @@ struct AtomicCASOpConversion
   }
 };
 
-bool supportsGlobalAtomicF16PackedAndDpp(ISAFamily isaFamily) {
-  switch (isaFamily) {
-  case ISAFamily::CDNA1:
-  case ISAFamily::CDNA2:
-  case ISAFamily::CDNA3:
-  case ISAFamily::CDNA4:
-    return true;
-  default:
-    break;
-  }
-  return false;
-}
-
-struct AtomicRMWOpConversion
-    : public ConvertOpToLLVMPattern<triton::AtomicRMWOp>,
-      public LoadStoreConversionBase {
-  AtomicRMWOpConversion(LLVMTypeConverter &converter,
-                        const NANO::TargetInfo &targetInfo,
-                        ModuleAxisInfoAnalysis &axisAnalysisPass,
-                        PatternBenefit benefit)
-      : ConvertOpToLLVMPattern(converter, benefit),
-        LoadStoreConversionBase(targetInfo, axisAnalysisPass) {}
-
-  LogicalResult
-  matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-    auto b = TritonLLVMOpBuilder(loc, rewriter);
-
-    auto binOp = matchAtomicOp(op.getAtomicRmwOp());
-    if (!binOp)
-      return rewriter.notifyMatchFailure(op, "Unsupported RMW operation");
-
-    auto memOrder = getMemoryOrdering(op.getSem());
-    if (!memOrder)
-      return rewriter.notifyMatchFailure(op, "Unsupported RMW memory order");
-
-    auto scopeStr = getAMDGPUMemScopeStr(op.getScope());
-    if (!scopeStr)
-      return rewriter.notifyMatchFailure(op, "Unsupported RMW scope");
-
-    auto emitter =
-        LLVM::NANO::AtomicRMWEmitter(targetInfo, *binOp, *memOrder, *scopeStr);
-
-    Value val = op.getVal();
-    Value ptr = op.getPtr();
-    Value opResult = op.getResult();
-    auto atomicRmwAttr = op.getAtomicRmwOp();
-
-    Value llPtr = adaptor.getPtr();
-    Value llVal = adaptor.getVal();
-    Value llMask = adaptor.getMask();
-
-    auto valElements = unpackLLElements(loc, llVal, rewriter);
-    auto ptrElements = unpackLLElements(loc, llPtr, rewriter);
-    SmallVector<Value> maskElements;
-    if (llMask)
-      maskElements = unpackLLElements(loc, llMask, rewriter);
-
-    auto tensorTy = dyn_cast<RankedTensorType>(opResult.getType());
-    Type valueElemTy =
-        tensorTy ? getTypeConverter()->convertType(tensorTy.getElementType())
-                 : opResult.getType();
-
-    int numElems = 1;
-    // In the case of unpaired f16 elements utilize dpp instructions to
-    // accelerate atomics. Here is an algorithm of lowering
-    // tt::atomicRmwOp(%ptr, %val, %mask):
-    // 0. Group thread by pairs. Master thread is (tid % 2 == 0);
-    // 1. All the threads send %val to (tid - 1) thread via dppUpdateOp shl, so
-    //    all the masters receive value from secondary threads;
-    // 2. Take into account parity in the %mask value, build control flow
-    //    structures according to it;
-    // 3. Generate llvm::atomicRmwOp in the threads enabled by %mask value;
-    // 4. All the threads send result of generated operation to (tid + 1) thread
-    //    via dppUpdateOp shl, so all secondary thread also receive their
-    //    result.
-    //
-    // This approach enables us to use half the active threads committing atomic
-    // requests to avoid generating of code providing unified access to f16
-    // element and reduce contention.
-    bool applyPackingF16 = false;
-    auto vec = getVectorSize(ptr, axisAnalysisPass);
-    if (llMask) {
-      vec = std::min<unsigned>(vec, getMaskAlignment(op.getMask()));
-    }
-
-    // CDNA3/CDNA4 arch allows to accelerate its atomics with LDS reduction
-    // algorithm, which is only applicable for atomics with no return. Otherwise
-    // we have to deal with an additional overhead.
-    bool enableIntraWaveReduce =
-        llvm::is_contained({ISAFamily::CDNA3, ISAFamily::CDNA4},
-                           targetInfo.getISAFamily()) &&
-        tensorTy && opResult.use_empty();
-
-    // TODO: support data types less than 32 bits
-    enableIntraWaveReduce &= valueElemTy.getIntOrFloatBitWidth() >= 32;
-
-    if (tensorTy) {
-      bool isF16Ty = valueElemTy.isF16() || valueElemTy.isBF16();
-      unsigned availableVecSize = isF16Ty ? 2 : 1;
-      vec = std::min<unsigned>(vec, availableVecSize);
-      // Force F16 packing in the case it's not coming in as packed, but the
-      // ISA can support packed atomic instructions.
-      applyPackingF16 =
-          supportsGlobalAtomicF16PackedAndDpp(targetInfo.getISAFamily()) &&
-          vec == 1 && isF16Ty && atomicRmwAttr == RMWOp::FADD &&
-          !enableIntraWaveReduce;
-      numElems = tensorTy.getNumElements();
-
-      auto threadOrder = getThreadOrder(tensorTy);
-      unsigned contigWithinLanes =
-          axisAnalysisPass.getAxisInfo(ptr)->getContiguity(threadOrder.front());
-      enableIntraWaveReduce &= contigWithinLanes == 1;
-    }
-
-    auto vecTy = vec_ty(valueElemTy, vec);
-    auto elemsPerThread = getTotalElemsPerThread(val.getType());
-
-    auto freeVarMasks = getFreeVariableMasks(op.getPtr().getType());
-    Value threadPred =
-        emitRedundantThreadPredicate(freeVarMasks, rewriter, loc, targetInfo);
-    auto tid = getThreadId(rewriter, loc);
-
-    bool needLdsStaging = !tensorTy && !opResult.use_empty();
-    std::optional<Value> atomicSharedMemBase =
-        op->hasAttr("allocation.offset") && needLdsStaging
-            ? std::optional<Value>(getSharedMemoryBase(
-                  loc, rewriter, targetInfo, op.getOperation()))
-            : std::nullopt;
-
-    SmallVector<Value> resultVals(elemsPerThread);
-    for (size_t i = 0; i < elemsPerThread; i += vec) {
-      // TODO: in case llMask is zero we can create only one branch for all
-      // elemsPerThread.
-      Value rmwMask = llMask ? b.and_(threadPred, maskElements[i]) : threadPred;
-      if (applyPackingF16) {
-        resultVals[i] = emitter.emitPairedAtomicForEvenTID(
-            rewriter, ptrElements[i], valElements[i], rmwMask);
-      } else {
-        Value valElement;
-        if (vec == 1) {
-          valElement = valElements[i];
-        } else {
-          Value vecVal = b.undef(vecTy);
-          for (size_t ii = 0; ii < vec; ++ii)
-            vecVal = b.insert_element(vecTy, vecVal, valElements[i + ii],
-                                      b.i32_val(ii));
-          valElement = vecVal;
-        }
-
-        // If we have a single tl.atomic_rmw that is lowered into multiple
-        // llvm.atomic_rmw, and we set the ordering for each to aql_rel (the
-        // default if no sem value is explicitly set in the DSL level
-        // tl.atomic_add. The llvm backend will insert extra buffer invalidates
-        // and L2 write backs causing a perforance degration. To avoid this we
-        // set the ordering to release for the first, acquire for the last, and
-        // relaxed for anything in between so that only a single set of
-        // buffer_inv and buffer_wbl2 instructions are inserted by the backend
-        // for any "cluster" of atomic ops.
-        if ((vec > 1 || elemsPerThread > 1) &&
-            op.getSem() == MemSemantic::ACQUIRE_RELEASE) {
-          if (i == 0) {
-            // First
-            emitter.setAtomicOrdering(LLVM::AtomicOrdering::release);
-          } else if (i == elemsPerThread - vec) {
-            // Last
-            emitter.setAtomicOrdering(LLVM::AtomicOrdering::acquire);
-          } else {
-            // Middle
-            emitter.setAtomicOrdering(LLVM::AtomicOrdering::monotonic);
-          }
-        }
-
-        Value retVal =
-            emitter.emitAtomicRMW(rewriter, ptrElements[i], valElement, rmwMask,
-                                  atomicSharedMemBase, enableIntraWaveReduce);
-
-        if (tensorTy) {
-          for (int ii = 0; ii < vec; ++ii) {
-            resultVals[i + ii] =
-                vec == 1
-                    ? retVal
-                    : b.extract_element(valueElemTy, retVal, b.i32_val(ii));
-          }
-        } else {
-          if (!atomicSharedMemBase.has_value()) {
-            rewriter.eraseOp(op);
-            return success();
-          }
-          Value atomPtr = *atomicSharedMemBase;
-          b.barrier(triton::gpu::AddrSpace::Local);
-          Value ret = b.load(valueElemTy, atomPtr);
-
-          rewriter.replaceOp(op, {ret});
-          return success();
-        }
-      }
-    }
-    finalizeTensorAtomicResults(op, tensorTy, rewriter, resultVals, valueElemTy,
-                                b, threadPred, targetInfo, getTypeConverter());
-    return success();
-  }
-};
+// AtomicRMWOpConversion removed - AtomicRMWEmitter not available
 
 // AsyncWaitOpConversion removed - TritonNANOGPU dialect not available
 
@@ -1267,10 +1063,10 @@ void populateLoadStoreOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                        ModuleAxisInfoAnalysis &axisInfoAnalysis,
                                        PatternBenefit benefit) {
   patterns.add<
-      AtomicCASOpConversion, AtomicRMWOpConversion, LoadOpConversion,
+      AtomicCASOpConversion, LoadOpConversion,
       StoreOpConversion, AsyncCopyGlobalToLocalOpConversion>(
       typeConverter, targetInfo, axisInfoAnalysis, benefit);
-  // AsyncWaitOpConversion, AsyncCopyLocalToGlobalOpConversion, AsyncCopyMbarrierArriveOpConversion
+  // AtomicRMWOpConversion, AsyncWaitOpConversion, AsyncCopyLocalToGlobalOpConversion, AsyncCopyMbarrierArriveOpConversion
   // removed - TritonNANOGPU dialect not available
   patterns.add<AsyncCommitGroupOpConversion>(typeConverter, benefit);
 }

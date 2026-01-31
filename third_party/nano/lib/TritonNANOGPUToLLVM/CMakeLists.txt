@@ -1,7 +1,5 @@
 add_triton_library(TritonNANOGPUToLLVM
-    AtomicRMWOpsEmitter.cpp
     AllocateSharedMemory.cpp
-    TensorPtrOpsToLLVM.cpp
     ConvertLayoutOpToLLVM.cpp
     MemoryOpToLLVM.cpp
     ElementwiseOpToLLVM.cpp
@@ -12,7 +10,6 @@ add_triton_library(TritonNANOGPUToLLVM
     TargetInfo.cpp
     TargetUtils.cpp
     MembarUtility.cpp
-    ScalarizePackedFOps.cpp
     WarpIdOpToLLVM.cpp
 
     DEPENDS

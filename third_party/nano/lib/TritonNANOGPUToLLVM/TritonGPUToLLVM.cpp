@@ -172,8 +172,6 @@ struct ConvertTritonNANOGPUToLLVM
                                              targetInfo, AMDBenefit);
     NANO::populateLoadStoreOpToLLVMPatterns(typeConverter, targetInfo, patterns,
                                            axisInfoAnalysis, AMDBenefit);
-    NANO::populateTensorPtrOpsToLLVMPatterns(typeConverter, patterns,
-                                            AMDBenefit);
 
     populatePatterns7(mlir::triton::populateReduceOpToLLVMPatterns,
                       commonBenefit);
