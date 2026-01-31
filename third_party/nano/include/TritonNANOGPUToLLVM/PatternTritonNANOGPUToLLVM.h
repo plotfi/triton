@@ -10,10 +10,6 @@ void populateExtractSliceOpToLLVMPatterns(
     mlir::LLVMTypeConverter &typeConverter, mlir::RewritePatternSet &patterns,
     mlir::PatternBenefit benefit);
 
-void populateScaledUpcastOpToLLVMPatterns(
-    mlir::LLVMTypeConverter &typeConverter, mlir::RewritePatternSet &patterns,
-    const NANO::TargetInfo &targetInfo, mlir::PatternBenefit benefit);
-
 } // namespace mlir::triton::NANO
 
 #endif // TRITON_THIRD_PARTY_NANO_INCLUDE_TRITONNANOGPUTOLLVM_PATTERNTRITONNANOGPUTOLLVM_H_
