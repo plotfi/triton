@@ -7,7 +7,6 @@ add_triton_library(TritonNANOGPUToLLVM
     Utility.cpp
     TargetInfo.cpp
     TargetUtils.cpp
-    MembarUtility.cpp
     WarpIdOpToLLVM.cpp
 
     DEPENDS

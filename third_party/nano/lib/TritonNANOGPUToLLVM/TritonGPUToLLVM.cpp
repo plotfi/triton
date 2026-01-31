@@ -2,7 +2,6 @@
 
 #include "PatternTritonGPUOpToLLVM.h"
 #include "TargetInfo.h"
-#include "TritonNANOGPUToLLVM/MembarUtility.h"
 #include "TritonNANOGPUToLLVM/TypeConverter.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
@@ -100,8 +99,7 @@ struct ConvertTritonNANOGPUToLLVM
     // Allocate shared memory and set barrier
     ModuleAllocation allocation(mod);
 
-    ModuleMembarAnalysis membarPass(&allocation,
-                                    mlir::triton::NANO::membarFilter);
+    ModuleMembarAnalysis membarPass(&allocation);
     membarPass.run();
 
     // Lower functions
