@@ -10,10 +10,6 @@ void populateExtractSliceOpToLLVMPatterns(
     mlir::LLVMTypeConverter &typeConverter, mlir::RewritePatternSet &patterns,
     mlir::PatternBenefit benefit);
 
-void populateConcatOpToLLVMPatterns(mlir::LLVMTypeConverter &typeConverter,
-                                    mlir::RewritePatternSet &patterns,
-                                    mlir::PatternBenefit benefit);
-
 void populateScaledUpcastOpToLLVMPatterns(
     mlir::LLVMTypeConverter &typeConverter, mlir::RewritePatternSet &patterns,
     const NANO::TargetInfo &targetInfo, mlir::PatternBenefit benefit);

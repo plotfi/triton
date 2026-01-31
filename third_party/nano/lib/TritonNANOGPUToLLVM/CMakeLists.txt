@@ -6,8 +6,6 @@ add_triton_library(TritonNANOGPUToLLVM
     ConvertLayoutOpToLLVM.cpp
     MemoryOpToLLVM.cpp
     MaskedOpsToLLVM.cpp
-    DotOpToLLVM/FMA.cpp
-    DotOpToLLVM.cpp
     ElementwiseOpToLLVM.cpp
     FuncOpToLLVM.cpp
     LoadStoreOpToLLVM.cpp
@@ -20,7 +18,6 @@ add_triton_library(TritonNANOGPUToLLVM
     Fp4ToFpOpToLLVM.cpp
     MembarUtility.cpp
     ScalarizePackedFOps.cpp
-    BarrierOpToLLVM.cpp
     WarpIdOpToLLVM.cpp
 
     DEPENDS

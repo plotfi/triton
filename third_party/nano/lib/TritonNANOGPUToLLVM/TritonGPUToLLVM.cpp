@@ -171,15 +171,12 @@ struct ConvertTritonNANOGPUToLLVM
                                                patterns, AMDBenefit);
     mlir::triton::populateConvertLayoutOpToLLVMPatterns(
         typeConverter, targetInfo, patterns, commonBenefit);
-    NANO::populateDotOpToLLVMPatterns(typeConverter, patterns, axisInfoAnalysis,
-                                     AMDBenefit);
     NANO::populateElementwiseOpToLLVMPatterns(typeConverter, patterns, ftz,
                                              axisInfoAnalysis, allocation,
                                              targetInfo, AMDBenefit);
     NANO::populateLoadStoreOpToLLVMPatterns(typeConverter, targetInfo, patterns,
                                            axisInfoAnalysis, AMDBenefit);
     NANO::populateMaskedOpsToLLVMPatterns(patterns, targetInfo);
-    NANO::populateBarrierOpToLLVMPatterns(typeConverter, patterns, AMDBenefit);
     NANO::populateTensorPtrOpsToLLVMPatterns(typeConverter, patterns,
                                             AMDBenefit);
 

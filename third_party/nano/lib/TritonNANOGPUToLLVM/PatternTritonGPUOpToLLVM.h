@@ -17,10 +17,6 @@ void populateMemoryOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                     const TargetInfo &targetInfo,
                                     PatternBenefit benefit);
 
-void populateDotOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
-                                 RewritePatternSet &patterns,
-                                 ModuleAxisInfoAnalysis &axisInfoAnalysis,
-                                 PatternBenefit benefit);
 void populateElementwiseOpToLLVMPatterns(
     LLVMTypeConverter &typeConverter, RewritePatternSet &patterns, bool ftz,
     ModuleAxisInfoAnalysis &axisInfoAnalysis, ModuleAllocation &allocation,
@@ -62,9 +58,6 @@ void populateTensorPtrOpsToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                         RewritePatternSet &patterns,
                                         PatternBenefit benefit);
 
-void populateBarrierOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
-                                     RewritePatternSet &patterns,
-                                     PatternBenefit benefit);
 void populateWarpIdOpToLLVMPattern(LLVMTypeConverter &typeConverter,
                                    const TargetInfo &targetInfo,
                                    RewritePatternSet &patterns,
