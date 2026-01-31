@@ -1,5 +1,4 @@
 add_triton_library(TritonNANOGPUToLLVM
-    AllocateSharedMemory.cpp
     ConvertLayoutOpToLLVM.cpp
     MemoryOpToLLVM.cpp
     ElementwiseOpToLLVM.cpp

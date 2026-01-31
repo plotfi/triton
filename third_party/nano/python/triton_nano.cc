@@ -49,8 +49,6 @@ void init_triton_nano_passes_ttgpuir(py::module &&m) {
         [](mlir::PassManager &pm, const std::string &arch, bool ftz) {
           pm.addPass(createConvertTritonNANOGPUToLLVMPass(arch, ftz));
         });
-  // ADD_PASS_WRAPPER_0("add_allocate_shared_memory",
-  //                    mlir::triton::createAllocateNANOGPUSharedMemory);
 }
 
 void addControlConstant(llvm::Module *module, const char *name,
