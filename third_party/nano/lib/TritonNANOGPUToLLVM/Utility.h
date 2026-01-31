@@ -86,22 +86,6 @@ unsigned getVectorSize(Value ptr, Value offset,
 
 Type scaleDotElemTypeToMLIRType(MLIRContext *ctx, triton::ScaleDotElemType t);
 
-// Returns true if we can perform coalesced write from the source encoding to
-// the destination encoding for a given vec size.
-bool canCoalesceWriteIntoSharedMemory(MLIRContext *ctx,
-                                      const LinearLayout &srcToSharedLayout,
-                                      unsigned threadsPerWarp,
-                                      unsigned vecSize);
-
-// Returns true if we can load directly from global |srcTy| to shared memory
-// |dstEnc| for the given target.
-// This function expects the caller to pass in |vectorSize| as the vector size
-// reading from global memory, after factoring in axis information and alignment
-// hints. It will be updated to factor in shared memory |dstEnc| constraints.
-bool canLoadDirectToLDS(const triton::NANO::TargetInfo &targetInfo,
-                        RankedTensorType srcTy, Attribute dstEnc,
-                        ArrayRef<int64_t> dstAllocShape, unsigned &vectorSize);
-
 // Check if the result of this tl.dot is used as opA or opB of another tl.dot
 // in the same region
 bool isChainDotHead(mlir::triton::DotOpInterface dotOp, unsigned opIdx = 0);

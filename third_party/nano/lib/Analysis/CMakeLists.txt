@@ -1,5 +1,4 @@
 add_triton_library(TritonNANOAnalysis
-  RangeAnalysis.cpp
   AxisInfoExt.cpp
   NANOGPUAllocation.cpp
 

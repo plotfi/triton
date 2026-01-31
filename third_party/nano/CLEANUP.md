@@ -38,8 +38,6 @@
      - MemoryOpToLLVM.cpp - removed LocalLoadPackedTransposedOp, MemoryCounterWaitOp; updated BarrierOpConversion
      - ElementwiseOpToLLVM.cpp - replaced SetFP8ClampingAttr with simple UnitAttr
    - Analysis files updated:
-     - AxisInfoExt.cpp - stubbed addVisitors
-     - RangeAnalysis.cpp - removed ExtractSliceOp handling
      - NANOGPUAllocation.cpp - updated include path for CommonUtils.h
 
 ## Files to Remove (Not Needed for Vector Add)
