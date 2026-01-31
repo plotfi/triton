@@ -4,8 +4,6 @@
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
-#include "third_party/nano/include/Utils/CommonUtils.h"
-
 namespace mlir::triton::NANO {
 
 // Max shmem instruction in bits
