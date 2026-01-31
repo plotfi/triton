@@ -5,7 +5,6 @@ add_triton_library(TritonNANOGPUToLLVM
     TensorPtrOpsToLLVM.cpp
     ConvertLayoutOpToLLVM.cpp
     MemoryOpToLLVM.cpp
-    MaskedOpsToLLVM.cpp
     ElementwiseOpToLLVM.cpp
     FuncOpToLLVM.cpp
     LoadStoreOpToLLVM.cpp
@@ -13,9 +12,7 @@ add_triton_library(TritonNANOGPUToLLVM
     Utility.cpp
     TargetInfo.cpp
     TargetUtils.cpp
-    SPMDOpToLLVM.cpp
     UpcastMXFPToLLVM.cpp
-    Fp4ToFpOpToLLVM.cpp
     MembarUtility.cpp
     ScalarizePackedFOps.cpp
     WarpIdOpToLLVM.cpp

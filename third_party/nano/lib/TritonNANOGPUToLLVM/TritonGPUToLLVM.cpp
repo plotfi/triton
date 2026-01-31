@@ -176,7 +176,6 @@ struct ConvertTritonNANOGPUToLLVM
                                              targetInfo, AMDBenefit);
     NANO::populateLoadStoreOpToLLVMPatterns(typeConverter, targetInfo, patterns,
                                            axisInfoAnalysis, AMDBenefit);
-    NANO::populateMaskedOpsToLLVMPatterns(patterns, targetInfo);
     NANO::populateTensorPtrOpsToLLVMPatterns(typeConverter, patterns,
                                             AMDBenefit);
 
@@ -203,7 +202,6 @@ struct ConvertTritonNANOGPUToLLVM
                                                      targetInfo, commonBenefit);
     mlir::triton::populateSPMDOpToLLVMPattern(typeConverter, patterns,
                                               targetInfo, commonBenefit);
-    NANO::populateSPMDOpToLLVMPattern(typeConverter, patterns, AMDBenefit);
 
     // TritonNANOGPU dialect patterns removed - not needed for minimal backend
     // mlir::triton::NANO::populateTritonNANOGPUToLLVMPatterns(...)
