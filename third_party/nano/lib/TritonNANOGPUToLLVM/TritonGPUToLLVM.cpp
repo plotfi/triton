@@ -184,8 +184,6 @@ struct ConvertTritonNANOGPUToLLVM
     populatePatterns7(mlir::triton::populateGatherOpToLLVMPatterns,
                       commonBenefit);
 
-    NANO::populateMemoryOpToLLVMPatterns(typeConverter, patterns, targetInfo,
-                                        AMDBenefit);
     mlir::triton::populateMemoryOpToLLVMPatterns(typeConverter, targetInfo,
                                                  patterns, commonBenefit);
     mlir::triton::populateMakeRangeOpToLLVMPattern(typeConverter, targetInfo,

@@ -1,6 +1,5 @@
 add_triton_library(TritonNANOGPUToLLVM
     ConvertLayoutOpToLLVM.cpp
-    MemoryOpToLLVM.cpp
     ElementwiseOpToLLVM.cpp
     FuncOpToLLVM.cpp
     LoadStoreOpToLLVM.cpp
