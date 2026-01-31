@@ -30,13 +30,8 @@ bool isSyncedViaAsyncWait(Operation *localLoadOp);
 // ALl manually synchronized LocalLoads will additionally have "AsyncCopies" as
 // a non alias scope to disable the implicit waits from the LLVM backend
 
-// If localLoadOp has a token from an AsyncWait:
-//  - Attaches "amdg.LocalLoad" alias scope to llLoadOp
-//  - Attaches "amdg.AsyncCopies" as *non* alias scope to llLoadOp
-void addLocalLoadNoAliasScope(Operation *localLoadOp,
-                              LLVM::AliasAnalysisOpInterface llLoadOp);
-// Overload from above without checking the AsyncToken
-void addLocalLoadNoAliasScope(LLVM::AliasAnalysisOpInterface llLoadOp);
+// addLocalLoadNoAliasScope removed - not needed for minimal nano backend
+
 // Attaches the "AsyncCopies" alias scope to llLoadDirectToLdsOp
 void addAsyncCopyAliasScope(LLVM::AliasAnalysisOpInterface llLoadDirectToLdsOp);
 

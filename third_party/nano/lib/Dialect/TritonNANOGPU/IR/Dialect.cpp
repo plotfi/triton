@@ -78,20 +78,6 @@ std::string getStringFromCoords(mlir::triton::NANO::ElemLocationKey coords) {
   return os.str();
 }
 
-// Helper function to verify TDM block dimensions
-static LogicalResult verifyTDMBlockSize(Operation *op,
-                                        ArrayRef<int64_t> blockShape) {
-  constexpr int64_t maxBlockSize = std::numeric_limits<uint16_t>::max();
-  for (size_t i = 0; i < blockShape.size(); ++i) {
-    if (blockShape[i] > maxBlockSize) {
-      return op->emitOpError("TDM block dimension ")
-             << i << " (" << blockShape[i] << ") exceeds maximum size of "
-             << maxBlockSize;
-    }
-  }
-  return success();
-}
-
 LogicalResult ExtractSliceOp::verify() {
   // Basic type/rank checks.
   auto srcTypeVal = getSource().getType();
@@ -621,42 +607,8 @@ void ConcatOp::getCanonicalizationPatterns(mlir::RewritePatternSet &patterns,
 }
 
 LogicalResult AsyncTDMCopyGlobalToLocalOp::verify() {
-  auto tensorDescTy = getDesc().getType();
-  auto smemTy = getResult().getType();
-
-  // Check that every dimension of the block shape is <= 2^16
-  auto blockShape = tensorDescTy.getBlockType().getShape();
-  auto verifyResult = verifyTDMBlockSize(getOperation(), blockShape);
-  if (failed(verifyResult))
-    return verifyResult;
-
-  auto swizzledEnc =
-      llvm::dyn_cast<gpu::SwizzledSharedEncodingAttr>(smemTy.getEncoding());
-  if (swizzledEnc && swizzledEnc.getMaxPhase() != 1)
-    return emitOpError("TDM does not support swizzling");
-
-  auto paddedEnc =
-      llvm::dyn_cast<gpu::PaddedSharedEncodingAttr>(smemTy.getEncoding());
-  if (!paddedEnc && !swizzledEnc)
-    return emitOpError("Invalid shared memory layout for TDM");
-
-  Type elementType = smemTy.getElementType();
-  auto elementBitWidth = elementType.getIntOrFloatBitWidth();
-  if (paddedEnc) {
-    unsigned dwordSize = 32;
-    for (auto [interval, padding] :
-         llvm::zip(paddedEnc.getIntervals(), paddedEnc.getPaddings())) {
-      auto intervalInDwords = interval * elementBitWidth / dwordSize;
-      if (intervalInDwords < 2)
-        return emitOpError("TDM padding interval must be at least 2 dwords");
-
-      auto paddingInDwords = padding * elementBitWidth / dwordSize;
-      if (paddingInDwords < 1)
-        return emitOpError("TDM padding amount must be at least 1 dword");
-    }
-  }
-
-  return success();
+  // TDM not supported in minimal nano backend
+  return emitOpError("TDM operations not supported in minimal nano backend");
 }
 
 // -- AsyncCopyLocalToGlobalOp --
@@ -670,72 +622,13 @@ LogicalResult AsyncCopyLocalToGlobalOp::verify() {
 }
 
 LogicalResult AsyncTDMCopyLocalToGlobalOp::verify() {
-  auto tensorDescTy = getDesc().getType();
-  auto smemTy = getSrc().getType();
-
-  // Check that every dimension of the block shape is <= 2^16
-  auto blockShape = tensorDescTy.getBlockType().getShape();
-  auto verifyResult = verifyTDMBlockSize(getOperation(), blockShape);
-  if (failed(verifyResult))
-    return verifyResult;
-
-  auto swizzledEnc =
-      llvm::dyn_cast<gpu::SwizzledSharedEncodingAttr>(smemTy.getEncoding());
-  if (swizzledEnc && swizzledEnc.getMaxPhase() != 1)
-    return emitOpError("TDM does not support swizzling");
-
-  auto paddedEnc =
-      llvm::dyn_cast<gpu::PaddedSharedEncodingAttr>(smemTy.getEncoding());
-  if (paddedEnc)
-    return emitOpError("TDM store does not support padding");
-
-  if (!paddedEnc && !swizzledEnc)
-    return emitOpError("Invalid shared memory layout for TDM");
-
-  return success();
+  // TDM not supported in minimal nano backend
+  return emitOpError("TDM operations not supported in minimal nano backend");
 }
 
 LogicalResult AsyncTDMScatterOp::verify() {
-  auto tensorDescTy = getDesc().getType();
-  auto smemTy = getSrc().getType();
-
-  // TDM scatter mode only supports 2D tensors
-  auto blockShape = tensorDescTy.getBlockType().getShape();
-  if (blockShape.size() != 2)
-    return emitOpError("TDM scatter only supports 2D tensors, got ")
-           << blockShape.size() << "D";
-
-  // Check that every dimension of the block shape is <= 2^16
-  auto verifyResult = verifyTDMBlockSize(getOperation(), blockShape);
-  if (failed(verifyResult))
-    return verifyResult;
-
-  auto dstRowIndicesType = cast<RankedTensorType>(getDstRowIndices().getType());
-  if (dstRowIndicesType.getRank() != 1)
-    return emitOpError("dst_row_indices must be a 1D tensor");
-
-  // Element type (i16 or i32) is already verified by ODS constraint
-  // TensorOf<[I16, I32]>
-
-  int64_t numIndices = dstRowIndicesType.getShape()[0];
-  if (!llvm::isPowerOf2_64(numIndices))
-    return emitOpError("dst_row_indices size must be a power of 2, got ")
-           << numIndices;
-
-  auto swizzledEnc =
-      llvm::dyn_cast<gpu::SwizzledSharedEncodingAttr>(smemTy.getEncoding());
-  if (swizzledEnc && swizzledEnc.getMaxPhase() != 1)
-    return emitOpError("TDM does not support swizzling");
-
-  auto paddedEnc =
-      llvm::dyn_cast<gpu::PaddedSharedEncodingAttr>(smemTy.getEncoding());
-  if (paddedEnc)
-    return emitOpError("TDM scatter does not support padding");
-
-  if (!paddedEnc && !swizzledEnc)
-    return emitOpError("Invalid shared memory layout for TDM");
-
-  return success();
+  // TDM not supported in minimal nano backend
+  return emitOpError("TDM operations not supported in minimal nano backend");
 }
 
 // -- InitBarrierOp --
@@ -771,70 +664,14 @@ LogicalResult AsyncCopyMbarrierArriveOp::verify() {
 }
 
 // -- TDMPrefetchOp --
-// This op optionally returns the prefetch offsets (testing-only). When
-// `returnOffsets` is absent, it produces no results. When present, it yields an
-// int64 tensor of the prefetch addresses relative to the tensor base. The
-// tensor shape is:
-//   [num_programs, block_shape[:-1], block_shape[-1] / elements_per_prefetch]
-// i.e., the last dimension is scaled by how many elements fit in one 256-byte
-// prefetch. Values are the byte offsets added to the base pointer for each
-// prefetch instruction.
+// TDM not supported in minimal nano backend
 LogicalResult TDMPrefetchOp::inferReturnTypes(
     MLIRContext *context, std::optional<Location> location, ValueRange operands,
     DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
     SmallVectorImpl<Type> &inferredReturnTypes) {
-  TDMPrefetchOp::Adaptor ad(operands, attributes, properties, regions);
-
-  // If returnOffsets is not set the op will not return any results
-  if (!ad.getReturnOffsets().has_value()) {
-    return success();
-  }
-
-  auto descType = cast<triton::TensorDescType>(ad.getDesc().getType());
-  auto blockType = descType.getBlockType();
-  auto blockShape = blockType.getShape();
-  auto elementType = blockType.getElementType();
-
-  // Lookup the module to get the number of threads per warp, number of warps
-  // and number of CTAs
-  ModuleOp mod;
-  for (auto operand : operands) {
-    if (auto op = operand.getDefiningOp()) {
-      mod = op->getParentOfType<ModuleOp>();
-      break;
-    } else if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
-      auto parentOp = blockArg.getOwner()->getParentOp();
-      if (parentOp) {
-        mod = parentOp->getParentOfType<ModuleOp>();
-        break;
-      }
-    }
-  }
-  assert(mod);
-
-  auto threadsPerWarp = triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod);
-  auto numWarps = triton::gpu::lookupNumWarps(mod);
-  auto numCTAs = triton::gpu::TritonGPUDialect::getNumCTAs(mod);
-
-  // Prefetches 256 bytes into L2
-  const int bytesPerPrefetch = 256;
-  int elemPerPrefetch =
-      (bytesPerPrefetch * 8) / elementType.getIntOrFloatBitWidth();
-
-  // Scale the block shape by the number of elements per prefetch
-  SmallVector<int64_t> scaledBlockShape(blockShape.begin(), blockShape.end());
-  scaledBlockShape.back() =
-      ceil<int64_t>(scaledBlockShape.back(), elemPerPrefetch);
-
-  // Use the default blocked encoding to unroll the TDM tile
-  auto enc = triton::gpu::getDefaultBlockedEncoding(
-      context, scaledBlockShape, numWarps, threadsPerWarp, numCTAs);
-  IntegerType i64Type = IntegerType::get(context, 64);
-  auto tensorTy = RankedTensorType::get(scaledBlockShape, i64Type, enc);
-
-  inferredReturnTypes.push_back(tensorTy);
-
-  return success();
+  // TDM not supported in minimal nano backend
+  // Return failure to indicate TDM operations should not be used
+  return failure();
 }
 
 // -- ClusterBarrierSignalOp --

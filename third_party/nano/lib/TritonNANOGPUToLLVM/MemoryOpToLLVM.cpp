@@ -1,5 +1,5 @@
 #include "AsyncUtility.h"
-#include "Dialect/TritonNANOGPU/IR/Dialect.h"
+// TritonNANOGPU dialect removed - not needed for minimal nano backend
 #include "PatternTritonGPUOpToLLVM.h"
 #include "TritonNANOGPUToLLVM/TargetUtils.h"
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
@@ -262,11 +262,7 @@ private:
       default:
         return {};
       }
-      // GFX1250 is currently using LLVM intrinsics so it cannot cast it to
-      // AliasAnalysisOpInterface
-      if (targetInfo.getISAFamily() != NANO::ISAFamily::GFX1250)
-        NANO::addLocalLoadNoAliasScope(
-            op, cast<LLVM::AliasAnalysisOpInterface>(dsReadTr.getDefiningOp()));
+      // addLocalLoadNoAliasScope removed - not needed for minimal nano backend
       Value vecVal = b.bitcast(dsReadTr, vTy);
       SmallVector<Value> loadedVals;
       for (int v = 0; v < vTy.getNumElements(); v++) {
@@ -313,137 +309,7 @@ private:
   const NANO::TargetInfo &targetInfo;
 };
 
-class LocalLoadPackedTransposedOpConversion
-    : public ConvertOpToLLVMPattern<
-          triton::nanogpu::LocalLoadPackedTransposedOp> {
-public:
-  LocalLoadPackedTransposedOpConversion(const LLVMTypeConverter &converter,
-                                        const NANO::TargetInfo &targetInfo,
-                                        PatternBenefit benefit = 2)
-      : ConvertOpToLLVMPattern<triton::nanogpu::LocalLoadPackedTransposedOp>(
-            converter, benefit),
-        targetInfo(targetInfo) {}
-  using OpAdaptor =
-      typename triton::nanogpu::LocalLoadPackedTransposedOp::Adaptor;
-
-  LogicalResult
-  matchAndRewrite(triton::nanogpu::LocalLoadPackedTransposedOp op,
-                  OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    MemDescType srcTy = op.getSrc().getType();
-    RankedTensorType dstTy = op.getType();
-    auto typeConverter = this->getTypeConverter();
-    auto llvmElemTy = typeConverter->convertType(dstTy.getElementType());
-    unsigned bitWidth = llvmElemTy.getIntOrFloatBitWidth();
-
-    // FP4 is represented as i8 and
-    if (bitWidth != 8) {
-      return failure();
-    }
-    // FP4 packed along M/N are not supported yet on GFX1250
-    if (targetInfo.getISAFamily() == NANO::ISAFamily::GFX1250) {
-      return failure();
-    }
-
-    return lowerSharedToDotOperandTransLL(op, adaptor, typeConverter, rewriter);
-  }
-
-private:
-  LogicalResult
-  lowerSharedToDotOperandTransLL(triton::nanogpu::LocalLoadPackedTransposedOp op,
-                                 OpAdaptor adaptor,
-                                 const LLVMTypeConverter *typeConverter,
-                                 ConversionPatternRewriter &rewriter) const {
-    auto ctx = rewriter.getContext();
-    auto loc = op.getLoc();
-    auto b = TritonLLVMOpBuilder(loc, rewriter);
-    auto kReg = str_attr("register");
-    auto kLane = str_attr("lane");
-    auto kWarp = str_attr("warp");
-    auto kOffset = str_attr("offset");
-    auto dstTy = cast<RankedTensorType>(op.getType());
-    auto srcTy = cast<MemDescType>(op.getSrc().getType());
-    auto llvmElemTy = typeConverter->convertType(dstTy.getElementType());
-    auto bitWidth = llvmElemTy.getIntOrFloatBitWidth();
-    auto smemObj = LLVM::getSharedMemoryObjectFromStruct(loc, adaptor.getSrc(),
-                                                         llvmElemTy, rewriter);
-    mlir::Type retTy = dstTy;
-    auto [laneId, warpId] = getLaneAndWarpId(rewriter, loc);
-    auto affineOffset = smemObj.getShmemOffset(loc, rewriter, srcTy);
-    auto maskSpanAffineOffset = smemObj.getMaskSpanOffsets(srcTy);
-    auto paddingShifts = getPaddedSharedShifts(srcTy.getEncoding(), bitWidth,
-                                               /*offsetInBytes=*/true);
-
-    auto shape = srcTy.getShape();
-    auto ldsTransLoadParams = targetInfo.queryLDSTransLoadParams(bitWidth);
-    if (!ldsTransLoadParams)
-      return failure();
-    // FP4 are packed into i8 so the real bitWidth is different
-    auto llBitWidth = 4;
-    auto ldsTransLayout = triton::gpu::chooseDsReadTrLayout(
-        dstTy.getEncoding(), shape, llBitWidth,
-        ldsTransLoadParams->instBitWidth,
-        ldsTransLoadParams->numLanesInShuffleGroup);
-
-    // Check that we have computed a layout
-    if (!ldsTransLayout) {
-      return failure();
-    }
-
-    auto smemPtrTy = ptr_ty(ctx, 3);
-    auto paddedEnc =
-        dyn_cast<triton::gpu::PaddedSharedEncodingAttr>(srcTy.getEncoding());
-    LinearLayout cvt = LinearLayout::empty();
-    if (paddedEnc) {
-      const auto &sharedLL = paddedEnc.getLinearComponent();
-      cvt = ldsTransLayout->invertAndCompose(sharedLL);
-    } else {
-      auto sharedLL = triton::gpu::toLinearLayout(srcTy);
-      cvt = ldsTransLayout->invertAndCompose(sharedLL);
-    }
-    // Check that we will be able to vectorize the load.
-    // Need to have exactly ldsTransLoadParams->tileSize,
-    // otherwise we can't use ds_read_tr
-    auto [elemsPerVec, permutation] =
-        largestVectorisation(ctx, cvt, bitWidth, ldsTransLoadParams->tileSize);
-
-    if (paddedEnc)
-      elemsPerVec = std::min<int>(elemsPerVec, paddedEnc.getMinInterval());
-
-    if (elemsPerVec != ldsTransLoadParams->tileSize)
-      return failure();
-
-    cvt = cvt.sublayout({kReg, kLane, kWarp}, {kOffset});
-    auto lowerInst = [&](RewriterBase &rewriter, Location loc,
-                         ArrayRef<Value> inVals, Value vecAddr, int idx,
-                         VectorType vTy) -> SmallVector<Value> {
-      auto numElemsI32 = (vTy.getNumElements() * bitWidth / 32);
-      auto vTyI32 = VectorType::get(numElemsI32, i32_ty);
-      Value dsReadTr =
-          ROCDL::ds_read_tr4_b64::create(rewriter, loc, vTyI32, vecAddr);
-      Value vecVal = b.bitcast(dsReadTr, vTy);
-      SmallVector<Value> loadedVals;
-      for (int v = 0; v < vTy.getNumElements(); v++) {
-        loadedVals.push_back(
-            b.extract_element(llvmElemTy, vecVal, b.i32_val(v)));
-      }
-
-      return loadedVals;
-    };
-
-    SmallVector<Value> outVals = lowerLdSt(
-        loc, rewriter.getContext(), cvt, {}, // Input for store, output for load
-        llvmElemTy, smemObj.getBase(), paddingShifts, affineOffset,
-        maskSpanAffineOffset, laneId, warpId, rewriter, targetInfo,
-        ldsTransLoadParams->tileSize, lowerInst);
-    Value result = packLLElements(loc, typeConverter, outVals, rewriter, retTy);
-    rewriter.replaceOp(op, result);
-    return success();
-  }
-
-private:
-  const NANO::TargetInfo &targetInfo;
-};
+// LocalLoadPackedTransposedOpConversion removed - TritonNANOGPU dialect not available
 
 class BarrierOpConversion
     : public ConvertOpToLLVMPattern<triton::gpu::BarrierOp> {
@@ -468,22 +334,21 @@ public:
                 triton::gpu::AddrSpace::TensorWrite;
     if ((op.getAddrSpace() & ~mask) != triton::gpu::AddrSpace::None)
       return failure();
-    // We can lower barrier to MemoryCounterWaitOp + s_barrier
-    // - MemoryCounterWaitOp specifies how many operations to
-    //   VMEM(Read)/VMEM(Write)/LDS can be outstanding when
-    //   the instruction completes.
-    // - s_barrier synchronizes the execution for the CTA
-    IntegerAttr zero = rewriter.getI32IntegerAttr(0);
     bool localBarrier = op.hasLocal();
     bool globalBarrier = op.hasGlobalRead() || op.hasGlobalWrite();
     if (globalBarrier)
       return failure();
     if (localBarrier) {
-      nanogpu::MemoryCounterWaitOp::create(
-          rewriter, op->getLoc(),
-          /* load= */ op.hasGlobalRead() ? zero : nullptr,
-          /* store= */ op.hasGlobalWrite() ? zero : nullptr,
-          /* ds= */ localBarrier ? zero : nullptr);
+      // MemoryCounterWaitOp removed - use ROCDL wait directly
+      // Wait for LDS operations to complete before barrier
+      auto isaVersion = targetInfo.getIsaVersion();
+      if (isaVersion.Major >= 12) {
+        ROCDL::WaitDscntOp::create(rewriter, op->getLoc(), 0);
+      } else {
+        // Use s_waitcnt lgkmcnt(0) for pre-gfx12
+        unsigned waitValue = 0xF70F; // lgkmcnt=0, vmcnt=max, expcnt=max
+        ROCDL::SWaitcntOp::create(rewriter, op->getLoc(), waitValue);
+      }
     }
     rewriter.replaceOpWithNewOp<ROCDL::SBarrierOp>(op);
 
@@ -494,122 +359,7 @@ private:
   const NANO::TargetInfo &targetInfo;
 };
 
-/// Encodes the waitcnt value for AMDGPU architectures.
-///
-/// Note: This function duplicates the bitpacking logic from AMDGPU backend
-/// (llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.h), as it's not accessible from
-/// llvm/include. The logic handles different encoding schemes across
-/// various GPU architecture versions (pre-gfx9 to gfx11).
-///
-/// The waitcnt encoding uses different bit positions for each counter
-/// based on the ISA version:
-/// - Vmcnt (vector memory counter): tracks pending vector memory operations
-/// - Expcnt (export counter): tracks pending export operations
-/// - Lgkmcnt (LDS/GDS/scalar memory counter): tracks pending LDS/GDS/scalar
-/// memory ops
-///
-/// Each architecture version has its own bit layout, Vmcnt, Expcnt and Lgkmcnt
-/// are decoded as follows:
-///     Vmcnt = Waitcnt[3:0]        (pre-gfx9)
-///     Vmcnt = Waitcnt[15:14,3:0]  (gfx9,10)
-///     Vmcnt = Waitcnt[15:10]      (gfx11)
-///     Expcnt = Waitcnt[6:4]       (pre-gfx11)
-///     Expcnt = Waitcnt[2:0]       (gfx11)
-///     Lgkmcnt = Waitcnt[11:8]     (pre-gfx10)
-///     Lgkmcnt = Waitcnt[13:8]     (gfx10)
-///     Lgkmcnt = Waitcnt[9:4]      (gfx11)
-static FailureOr<unsigned> encodeWaitcnt(llvm::AMDGPU::IsaVersion isaVersion,
-                                         unsigned vmcnt, unsigned lgkmcnt) {
-  if (isaVersion.Major == 9) {
-    vmcnt = std::min(63u, vmcnt);
-    unsigned expcnt = 0x7;
-    lgkmcnt = std::min(15u, lgkmcnt);
-    unsigned lowBits = vmcnt & 0xF;
-    unsigned highBits = (vmcnt >> 4) << 14;
-    unsigned otherCnts = (expcnt << 4) | (lgkmcnt << 8);
-    return lowBits | highBits | otherCnts;
-  }
-  if (isaVersion.Major == 10) {
-    vmcnt = std::min(63u, vmcnt);
-    unsigned expcnt = 0x7;
-    lgkmcnt = std::min(63u, lgkmcnt);
-    unsigned lowBits = vmcnt & 0xF;
-    unsigned highBits = (vmcnt >> 4) << 14;
-    unsigned otherCnts = (expcnt << 4) | (lgkmcnt << 8);
-    return lowBits | highBits | otherCnts;
-  }
-  if (isaVersion.Major == 11) {
-    vmcnt = std::min(63u, vmcnt);
-    unsigned expcnt = 0x7;
-    lgkmcnt = std::min(63u, lgkmcnt);
-    return (vmcnt << 10) | expcnt | (lgkmcnt << 4);
-  }
-  return failure();
-}
-
-struct MemoryCounterWaitOpConversion
-    : public ConvertOpToLLVMPattern<nanogpu::MemoryCounterWaitOp> {
-  MemoryCounterWaitOpConversion(const LLVMTypeConverter &converter,
-                                const NANO::TargetInfo &targetInfo,
-                                PatternBenefit benefit)
-      : ConvertOpToLLVMPattern(converter, benefit), targetInfo(targetInfo) {}
-
-  LogicalResult
-  matchAndRewrite(nanogpu::MemoryCounterWaitOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto isaVersion = targetInfo.getIsaVersion();
-
-    /// If major version >= fgx12, lower  to
-    ///   * ROCDL::WaitDscntOp if ds is present
-    ///   * ROCDL::WaitLoadcntOp if load is present
-    ///   * ROCDL::WaitStorecntOp if store is present
-    if (isaVersion.Major >= 12) {
-      Location loc = op.getLoc();
-      if (std::optional<int> ds = adaptor.getDs())
-        ROCDL::WaitDscntOp::create(rewriter, loc, *ds);
-
-      if (std::optional<int> load = adaptor.getLoad())
-        ROCDL::WaitLoadcntOp::create(rewriter, loc, *load);
-
-      if (std::optional<int> store = adaptor.getStore())
-        ROCDL::WaitStorecntOp::create(rewriter, loc, *store);
-
-      rewriter.eraseOp(op);
-      return success();
-    }
-
-    /// Otherwise, lower to ROCDL::SWaitcntOp
-    auto getVal = [](Attribute attr) -> unsigned {
-      if (attr)
-        return cast<IntegerAttr>(attr).getInt();
-
-      // This value will be clamped to the maximum value for the target version.
-      return 1024;
-    };
-    unsigned ds = getVal(adaptor.getDsAttr());
-
-    unsigned vmcnt = 1024;
-    Attribute load = adaptor.getLoadAttr();
-    Attribute store = adaptor.getStoreAttr();
-    if (load && store) {
-      vmcnt = getVal(load) + getVal(store);
-    } else if (load) {
-      vmcnt = getVal(load);
-    } else if (store) {
-      vmcnt = getVal(store);
-    }
-
-    FailureOr<unsigned> waitcnt = encodeWaitcnt(isaVersion, vmcnt, ds);
-    if (failed(waitcnt))
-      return op.emitOpError("unsupported chipset");
-
-    rewriter.replaceOpWithNewOp<ROCDL::SWaitcntOp>(op, *waitcnt);
-    return success();
-  }
-
-private:
-  const NANO::TargetInfo &targetInfo;
-};
+// MemoryCounterWaitOpConversion removed - TritonNANOGPU dialect not available
 
 } // namespace
 
@@ -621,8 +371,7 @@ void mlir::triton::NANO::populateMemoryOpToLLVMPatterns(
 
   patterns.add<TransLocalLoadOpConversion>(typeConverter, targetInfo,
                                            transBenefit);
-  patterns.add<LocalLoadPackedTransposedOpConversion>(typeConverter, targetInfo,
-                                                      benefit);
-  patterns.add<BarrierOpConversion, MemoryCounterWaitOpConversion>(
-      typeConverter, targetInfo, barrierBenefit);
+  // LocalLoadPackedTransposedOpConversion, MemoryCounterWaitOpConversion removed
+  // - TritonNANOGPU dialect not available
+  patterns.add<BarrierOpConversion>(typeConverter, targetInfo, barrierBenefit);
 }

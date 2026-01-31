@@ -1,6 +1,5 @@
 #include "TritonNANOGPUToLLVM/MembarUtility.h"
 #include "AsyncUtility.h"
-#include "Dialect/TritonNANOGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -48,15 +47,10 @@ bool filterAsyncLocalLoadsDependencies(Operation *op1, Operation *op2,
          isLocalLoadWithAsyncWaitToken(op2);
 }
 
+// TritonNANOGPU dialect barrier operations removed
 bool filterLDSMemoryBarriersDependencies(Operation *op1, Operation *op2) {
-  auto isLDSMemoryBarrierOp = [](Operation *op) {
-    return llvm::isa<triton::nanogpu::InitBarrierOp,
-                     triton::nanogpu::ArriveBarrierOp,
-                     triton::nanogpu::AsyncCopyMbarrierArriveOp,
-                     triton::nanogpu::WaitBarrierOp>(op);
-  };
-
-  return (isLDSMemoryBarrierOp(op1) && isLDSMemoryBarrierOp(op2));
+  // No nanogpu barrier operations to filter
+  return false;
 }
 } // namespace
 

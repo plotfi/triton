@@ -6,7 +6,6 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Iterators.h"
 #include "mlir/Interfaces/Utils/InferIntRangeCommon.h"
-#include "third_party/nano/include/Dialect/TritonNANOGPU/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
@@ -560,11 +559,6 @@ LogicalResult TritonIntegerRangeAnalysis::visitOperationHelper(
       operands, [](const dataflow::IntegerValueRangeLattice *lattice) {
         return lattice->getValue();
       });
-
-  if (auto sliceOp = dyn_cast<triton::nanogpu::ExtractSliceOp>(op)) {
-    joinCallback(sliceOp->getResult(0), argIntValueRanges[0]);
-    return success();
-  }
 
   // Ops with actually changing/variable input/output ranges.
   if (llvm::isa<TransOp, SplitOp, BroadcastOp, ReshapeOp, gpu::ConvertLayoutOp,

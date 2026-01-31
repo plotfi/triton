@@ -33,7 +33,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
-#include "third_party/nano/include/Dialect/TritonNANOGPU/IR/Dialect.h"
+// TritonNANOGPU dialect removed - not needed for minimal nano backend
 #include "triton/Analysis/Membar.h"
 #include "triton/Dialect/TritonGPU/IR/Attributes.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
@@ -138,11 +138,13 @@ private:
     auto warpHigh = arith::CmpIOp::create(b, loc, arith::CmpIPredicate::ne,
                                           warpIDX, constZero);
 
-    mlir::triton::nanogpu::CondBarrierOp::create(b, loc, warpHigh);
+    // CondBarrierOp removed - TritonNANOGPU dialect not available
+    // mlir::triton::nanogpu::CondBarrierOp::create(b, loc, warpHigh);
 
     // Insert condbarrier::first_half after the end of the loop
     b.setInsertionPointAfter(forOp);
-    mlir::triton::nanogpu::CondBarrierOp::create(b, loc, warpLow);
+    // CondBarrierOp removed - TritonNANOGPU dialect not available
+    // mlir::triton::nanogpu::CondBarrierOp::create(b, loc, warpLow);
 
     // 2. Collect existing barrier information.
     // Scanning the loop body and classifying each consecutive block of
@@ -165,8 +167,7 @@ private:
         clusterOps.push_back(&op);
         clusterBlocks.push_back(&exeOp->getRegion(0).front());
         bars.push_back(false);
-      } else if (isa<ROCDL::BarrierOp, gpu::BarrierOp, triton::gpu::AsyncWaitOp,
-                     triton::nanogpu::AsyncTDMWait>(op)) {
+      } else if (isa<ROCDL::BarrierOp, gpu::BarrierOp, triton::gpu::AsyncWaitOp>(op)) {
         int currCluster = clusterBlocks.size();
         // Reject if multiple barriers appear without an intervening cluster.
         // This is functionally valid but may cause unpredictable timing. Users

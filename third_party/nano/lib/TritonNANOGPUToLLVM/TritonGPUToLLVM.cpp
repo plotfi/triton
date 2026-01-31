@@ -18,7 +18,6 @@
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
 #include "mlir/Pass/Pass.h"
 #include "third_party/nano/include/Analysis/AxisInfoExt.h"
-#include "third_party/nano/include/Dialect/TritonNANOGPU/IR/Dialect.h"
 #include "triton/Analysis/Allocation.h"
 #include "triton/Analysis/Membar.h"
 #include "triton/Conversion/TritonGPUToLLVM/PatternTritonGPUOpToLLVM.h"
@@ -60,7 +59,6 @@ public:
     addIllegalDialect<triton::nvidia_gpu::TritonNvidiaGPUDialect>();
     addIllegalDialect<mlir::gpu::GPUDialect>();
     addLegalOp<mlir::UnrealizedConversionCastOp>();
-    addLegalOp<triton::nanogpu::InstructionSchedHint>();
     addDynamicallyLegalOp<triton::gpu::GlobalScratchAllocOp>(
         [](triton::gpu::GlobalScratchAllocOp op) {
           return op.getBackend() != "default";
@@ -78,8 +76,7 @@ struct ConvertTritonNANOGPUToLLVM
 
   void getDependentDialects(DialectRegistry &registry) const override {
     registry
-        .insert<LLVM::LLVMDialect, NVVM::NVVMDialect, mlir::ROCDL::ROCDLDialect,
-                mlir::triton::nanogpu::TritonNANOGPUDialect>();
+        .insert<LLVM::LLVMDialect, NVVM::NVVMDialect, mlir::ROCDL::ROCDLDialect>();
   }
 
   void runOnOperation() override {
@@ -211,12 +208,11 @@ struct ConvertTritonNANOGPUToLLVM
                                               targetInfo, commonBenefit);
     NANO::populateSPMDOpToLLVMPattern(typeConverter, patterns, AMDBenefit);
 
-    mlir::triton::NANO::populateTritonNANOGPUToLLVMPatterns(
-        typeConverter, patterns, targetInfo, AMDBenefit);
-    mlir::triton::NANO::populateUpcastMXFPToLLVMPatterns(typeConverter, patterns,
-                                                        targetInfo, AMDBenefit);
-    mlir::triton::NANO::populateFp4ToFpToLLVMPatterns(typeConverter, patterns,
-                                                     targetInfo, AMDBenefit);
+    // TritonNANOGPU dialect patterns removed - not needed for minimal backend
+    // mlir::triton::NANO::populateTritonNANOGPUToLLVMPatterns(...)
+    // mlir::triton::NANO::populateUpcastMXFPToLLVMPatterns(...)
+    // mlir::triton::NANO::populateFp4ToFpToLLVMPatterns(...)
+
     // TODO(thomas): this should probably be done in a separate step to not
     // interfere with our own lowering of arith ops. Add arith/math's patterns
     // to help convert scalar expression to LLVM.

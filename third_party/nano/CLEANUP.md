@@ -6,6 +6,41 @@
 2. Updated `driver.c` to use `hip_minimal.h` instead of `hip_runtime.h` and `hip_runtime_api.h`
 3. Removed texture/surface, math library, and profiling includes from various headers
 4. Removed TDM (Tensor Data Mover) support from `driver.c`, `driver.py`, and `compiler.py`
+5. Removed ockl.bc dependency (printf stubbed out, mulhi uses LLVM intrinsics)
+6. Removed TDM support from LLVM lowering:
+   - Removed TDMUtility.cpp from CMakeLists.txt
+   - Removed TDMUtility.h includes from all files
+   - Removed TDM conversion patterns from LoadStoreOpToLLVM.cpp
+   - Stubbed TensorPtrOpsToLLVM.cpp (was all TDM code)
+   - Made supportsTDM() always return false in TargetInfo.cpp
+   - Made supports_tdm Python binding always return false in triton_nano.cc
+   - Removed AsyncTDMWait from ConvertWarpPipeline.cpp
+   - Stubbed TDM operation verifiers in Dialect.cpp to emit errors
+
+7. **Removed TritonNANOGPU dialect**:
+   - Removed `include/Dialect/TritonNANOGPU/` from CMakeLists.txt (add_subdirectory commented out)
+   - Removed `lib/Dialect/TritonNANOGPU/` from CMakeLists.txt (add_subdirectory commented out)
+   - Removed `lib/TritonNANOGPUDialectToLLVM/` from CMakeLists.txt
+   - Moved CommonUtils.h/cpp to `include/Utils/` and `lib/Analysis/`
+   - Updated python/triton_nano.cc to not register nanogpu dialect
+   - Updated all TritonNANOGPUToLLVM files to remove dialect includes:
+     - TritonGPUToLLVM.cpp - removed dialect registration and pattern calls
+     - MembarUtility.cpp - stubbed filterLDSMemoryBarriersDependencies
+     - AsyncUtility.cpp - removed nanogpu::AsyncWaitOp and LocalLoadPackedTransposedOp
+     - SPMDOpToLLVM.cpp - removed CondBarrierOpConversion
+     - BarrierOpToLLVM.cpp - completely stubbed
+     - MaskedOpsToLLVM.cpp - completely stubbed
+     - Utility.cpp - rewrote llLoad/llStore to use LLVM ops directly
+     - SchedInstructions.cpp - passes are now no-ops
+     - ConvertWarpPipeline.cpp - removed CondBarrierOp usage
+     - LoadStoreOpToLLVM.cpp - removed AsyncWaitOp, AsyncCopyLocalToGlobalOp, AsyncCopyMbarrierArriveOp
+     - UpcastMXFPToLLVM.cpp - completely stubbed (UpcastMXFPOp pattern removed)
+     - MemoryOpToLLVM.cpp - removed LocalLoadPackedTransposedOp, MemoryCounterWaitOp; updated BarrierOpConversion
+     - ElementwiseOpToLLVM.cpp - replaced SetFP8ClampingAttr with simple UnitAttr
+   - Analysis files updated:
+     - AxisInfoExt.cpp - stubbed addVisitors
+     - RangeAnalysis.cpp - removed ExtractSliceOp handling
+     - NANOGPUAllocation.cpp - updated include path for CommonUtils.h
 
 ## Files to Remove (Not Needed for Vector Add)
 
@@ -53,6 +88,7 @@ rm -f backend/include/hip/hip_runtime.h \
       backend/include/hip/surface_types.h \
       backend/include/hip/hip_texture_types.h \
       backend/lib/ocml.bc \
+      backend/lib/ockl.bc \
       backend/lib/asanrtl.bc \
       backend/include/TDMCommon.h \
       lib/TritonNANOGPUToLLVM/TDMUtility.h \
@@ -64,19 +100,39 @@ rm -f backend/include/hip/hip_runtime.h \
 rmdir backend/include/hip/amd_detail/ 2>/dev/null || true
 ```
 
-## TDM Code Still To Remove
+## TritonNANOGPU Dialect - Removed
 
-The following files still contain TDM references that need manual cleanup:
+The TritonNANOGPU dialect has been completely removed from the build system. The directories still exist but are not built. All LLVM lowering patterns for dialect operations have been stubbed out or removed.
 
-- `lib/Dialect/TritonNANOGPU/IR/Dialect.cpp` - TDM dialect operations
-- `include/Dialect/TritonNANOGPU/IR/TritonNANOGPUOps.td` - TDM operation definitions
-- `lib/TritonNANOGPUToLLVM/CMakeLists.txt` - Remove TDMUtility.cpp from sources
-- `lib/TritonNANOGPUToLLVM/LoadStoreOpToLLVM.cpp` - TDM load/store lowering
-- `lib/TritonNANOGPUToLLVM/TensorPtrOpsToLLVM.cpp` - TDM tensor pointer ops
-- `lib/TritonNANOGPUToLLVM/TargetInfo.h` - TDM target info
-- `lib/TritonNANOGPUToLLVM/TargetInfo.cpp` - TDM target info implementation
-- `lib/TritonNANOGPUToLLVM/ConvertWarpPipeline.cpp` - TDM warp pipeline
-- `python/triton_nano.cc` - TDM Python bindings
+**Directories to delete (optional):**
+- `include/Dialect/TritonNANOGPU/`
+- `lib/Dialect/TritonNANOGPU/`
+- `lib/TritonNANOGPUDialectToLLVM/`
+
+**Removed dialect operations:**
+- CondBarrierOp
+- MemoryCounterWaitOp
+- AsyncWaitOp
+- AsyncCopyLocalToGlobalOp
+- AsyncCopyMbarrierArriveOp
+- LocalLoadPackedTransposedOp
+- UpcastMXFPOp
+- MaskedLoadOp/MaskedStoreOp
+- InstructionSchedHint
+- SetFP8ClampingAttr (replaced with simple UnitAttr)
+
+## TDM Code - Status
+
+TDM code has been stubbed out but the operations are still defined in TableGen (required for dialect to compile). Using TDM operations will emit errors at verification time.
+
+Remaining TDM references (benign - stubbed or disabled):
+- `include/Dialect/TritonNANOGPU/IR/TritonNANOGPUOps.td` - TDM operation definitions (kept for compilation, verifiers emit errors)
+- `lib/TritonNANOGPUToLLVM/TargetInfo.h` - supportsTDM() declaration (returns false)
+
+Files that can be deleted:
+- `lib/TritonNANOGPUToLLVM/TDMUtility.h`
+- `lib/TritonNANOGPUToLLVM/TDMUtility.cpp`
+- `backend/include/TDMCommon.h`
 
 ## What Remains (Minimal for Vector Add)
 
@@ -86,11 +142,9 @@ backend/
 ├── compiler.py          # Compilation pipeline
 ├── driver.py            # Kernel launching (Python)
 ├── driver.c             # C extension for HIP calls
-├── include/
-│   └── hip/
-│       └── hip_minimal.h  # Minimal HIP type definitions (~300 lines)
-└── lib/
-    └── ockl.bc          # Device intrinsics library
+└── include/
+    └── hip/
+        └── hip_minimal.h  # Minimal HIP type definitions (~300 lines)
 ```
 
 ## HIP APIs Used (Dynamically Loaded)

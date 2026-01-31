@@ -1,4 +1,4 @@
-#include "Dialect/TritonNANOGPU/IR/Dialect.h"
+// TritonNANOGPU dialect removed - not needed for minimal nano backend
 #include "TargetInfo.h"
 #include "TritonNANOGPUToLLVM/TargetUtils.h"
 #include "Utility.h"
@@ -1950,10 +1950,11 @@ struct FpToFpOpConversion
     if (dstType.isFloat() && (dstType.getIntOrFloatBitWidth() == 8)) {
       auto func = op->getParentOfType<LLVM::LLVMFuncOp>();
       if (func) {
-        using attrType = triton::nanogpu::SetFP8ClampingAttr;
-        auto attrName = attrType::getMnemonic();
-        if (!func->hasAttrOfType<attrType>(attrName)) {
-          func->setAttr(attrName, attrType::get(op->getContext()));
+        // SetFP8ClampingAttr removed - TritonNANOGPU dialect not available
+        // We use a simple string attribute to track FP8 clamping
+        auto attrName = StringRef("triton.set_fp8_clamping");
+        if (!func->hasAttr(attrName)) {
+          func->setAttr(attrName, UnitAttr::get(op->getContext()));
         }
       }
     }
@@ -2418,9 +2419,10 @@ void adjustModeRegister(ModuleOp mod, const TargetInfo &targetInfo) {
   auto auxBuilder = TritonLLVMOpBuilder(loc, builder);
 
   mod->walk([&](LLVM::LLVMFuncOp func) {
-    using attrType = triton::nanogpu::SetFP8ClampingAttr;
-    auto attrName = attrType::getMnemonic();
-    if (!func->hasAttrOfType<attrType>(attrName))
+    // SetFP8ClampingAttr removed - TritonNANOGPU dialect not available
+    // We use a simple string attribute to track FP8 clamping
+    auto attrName = StringRef("triton.set_fp8_clamping");
+    if (!func->hasAttr(attrName))
       return;
     else
       func->removeAttr(attrName);

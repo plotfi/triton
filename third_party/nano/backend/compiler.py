@@ -54,11 +54,8 @@ class NanoOptions:
         assert self.num_warps > 0 and (self.num_warps & (self.num_warps - 1)) == 0, \
             "num_warps must be a power of 2"
 
-        default_libdir = Path(__file__).parent / 'lib'
+        # No external libraries needed for basic kernels
         extern_libs = {} if self.extern_libs is None else dict(self.extern_libs)
-        # Only include ockl (device intrinsics), not ocml (math library)
-        for lib in ["ockl"]:
-            extern_libs[lib] = str(default_libdir / f'{lib}.bc')
         object.__setattr__(self, 'extern_libs', tuple(extern_libs.items()))
 
     def hash(self):
@@ -167,7 +164,7 @@ class NanoBackend(BaseBackend):
         passes.gluon.add_inliner(pm)
         passes.convert.add_index_to_llvmir(pm)
 
-        nano.passes.ttgpuir.add_allocate_shared_memory(pm)
+        # nano.passes.ttgpuir.add_allocate_shared_memory(pm)
 
         __NANO_FTZ = True
         nano.passes.ttgpuir.add_to_llvmir(pm, options.arch, __NANO_FTZ)

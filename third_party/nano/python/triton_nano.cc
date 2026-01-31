@@ -1,7 +1,6 @@
 // Triton Nano Backend - Minimal backend for simple kernels like vector add
 // Based on AMD backend, simplified for educational and prototyping purposes
 
-#include "Dialect/TritonNANOGPU/IR/Dialect.h"
 #include "TritonNANOGPUToLLVM/Passes.h"
 #include "TritonNANOGPUToLLVM/TargetUtils.h"
 #include "lib/TritonNANOGPUToLLVM/TargetInfo.h"
@@ -50,8 +49,8 @@ void init_triton_nano_passes_ttgpuir(py::module &&m) {
         [](mlir::PassManager &pm, const std::string &arch, bool ftz) {
           pm.addPass(createConvertTritonNANOGPUToLLVMPass(arch, ftz));
         });
-  ADD_PASS_WRAPPER_0("add_allocate_shared_memory",
-                     mlir::triton::createAllocateNANOGPUSharedMemory);
+  // ADD_PASS_WRAPPER_0("add_allocate_shared_memory",
+  //                    mlir::triton::createAllocateNANOGPUSharedMemory);
 }
 
 void addControlConstant(llvm::Module *module, const char *name,
@@ -104,7 +103,7 @@ void init_triton_nano(py::module &&m) {
 
   m.def("load_dialects", [](mlir::MLIRContext &context) {
     mlir::DialectRegistry registry;
-    registry.insert<mlir::triton::nanogpu::TritonNANOGPUDialect>();
+    // TritonNANOGPU dialect removed - using standard TritonGPU dialect
     mlir::registerROCDLDialectTranslation(registry);
     context.appendDialectRegistry(registry);
     context.loadAllAvailableDialects();
@@ -151,20 +150,7 @@ void init_triton_nano(py::module &&m) {
   });
 
   m.def("disable_print_inline", [](llvm::Module *module) {
-    std::array<const char *, 2> prefixes = {"__ockl_fprintf", "__ockl_printf"};
-
-    for (llvm::Function &f : module->functions()) {
-      if (!f.hasName())
-        continue;
-      llvm::StringRef name = f.getName();
-
-      auto isNamePrefixed = [&name](const char *prefix) {
-        return name.starts_with(prefix);
-      };
-
-      if (llvm::any_of(prefixes, isNamePrefixed))
-        f.addFnAttr(llvm::Attribute::NoInline);
-    }
+    // Printf not supported in minimal nano backend - no ockl functions to modify
   });
 
   m.def(
@@ -242,14 +228,6 @@ void init_triton_nano(py::module &&m) {
     return sti->checkFeatures("+architected-sgprs");
   });
 
-  m.def("supports_multi_cta_launch", [](const std::string &arch) {
-    return mlir::triton::NANO::TargetInfo(arch).supportsMultiCTALaunch();
-  });
-
-  m.def("supports_tdm", [](const std::string &arch) {
-    return mlir::triton::NANO::TargetInfo(arch).supportsTDM();
-  });
-
   m.def("need_extern_lib", [](llvm::Module *module, const std::string &lib) {
     for (llvm::Function &f : module->functions()) {
       if (f.hasExternalLinkage() && f.hasName() && !f.hasExactDefinition()) {
@@ -284,7 +262,7 @@ void init_triton_nano(py::module &&m) {
                                      " because " + errString.value());
         });
 
-  m.def("add_scalarize_packed_fops_llvm_pass", [](llvm::Function *fn) {
-    mlir::triton::NANO::runScalarizePackedFOpsPass(*fn);
-  });
+  // m.def("add_scalarize_packed_fops_llvm_pass", [](llvm::Function *fn) {
+  //   mlir::triton::NANO::runScalarizePackedFOpsPass(*fn);
+  // });
 }

@@ -1,6 +1,6 @@
 #include "AsyncUtility.h"
 #include "AtomicRMWOpsEmitter.h"
-#include "Dialect/TritonNANOGPU/IR/Dialect.h"
+// TritonNANOGPU dialect removed - not needed for minimal nano backend
 #include "PatternTritonGPUOpToLLVM.h"
 #include "TargetInfo.h"
 #include "Utility.h"
@@ -805,119 +805,7 @@ struct AsyncCopyGlobalToLocalOpConversion
   }
 };
 
-struct AsyncCopyLocalToGlobalOpConversion
-    : public ConvertOpToLLVMPattern<triton::nanogpu::AsyncCopyLocalToGlobalOp>,
-      public DirectToLdsLoadConversionBase {
-  AsyncCopyLocalToGlobalOpConversion(LLVMTypeConverter &converter,
-                                     const NANO::TargetInfo &targetInfo,
-                                     ModuleAxisInfoAnalysis &axisAnalysisPass,
-                                     PatternBenefit benefit)
-      : ConvertOpToLLVMPattern(converter, benefit),
-        DirectToLdsLoadConversionBase(targetInfo, axisAnalysisPass) {}
-
-  LogicalResult
-  matchAndRewrite(triton::nanogpu::AsyncCopyLocalToGlobalOp op,
-                  OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    // Only supported on GFX1250
-    if (targetInfo.getISAFamily() != ISAFamily::GFX1250) {
-      return rewriter.notifyMatchFailure(
-          op, "async_copy_local_to_global only supported on GFX1250");
-    }
-
-    auto loc = op.getLoc();
-    auto b = TritonLLVMOpBuilder(loc, rewriter);
-
-    auto srcTy = op.getSrc().getType();
-
-    auto dstTy = op.getDst().getType();
-    auto resElemTy = getTypeConverter()->convertType(srcTy.getElementType());
-    Value llSrc = adaptor.getSrc();
-
-    // We can store N elements at a time if:
-    //  1. Every group of N destination pointers are contiguous.
-    //  2. The mask (if present) has "alignment" N.
-    unsigned vec = getVectorSize(op.getDst(), axisAnalysisPass);
-    auto maskElements = getMaskElemsAndUpdateVeclen(
-        rewriter, loc, adaptor.getMask(), op.getMask(), vec);
-
-    auto dstElems = unpackLLElements(loc, adaptor.getDst(), rewriter);
-
-    // If the op has a contiguity hint use it to increase the vector size.
-    vec = std::max(vec, op.getContiguity());
-
-    // For padded encodings restrict vec by the min interval
-    auto srcEnc = srcTy.getEncoding();
-    if (auto padEnc = dyn_cast<PaddedSharedEncodingAttr>(srcEnc)) {
-      vec = std::min(vec, padEnc.getMinInterval());
-    }
-
-    Type dstPtrTy = dstElems[0].getType();
-    // Zip dst_ptr, mask for lowerLdSt
-    SmallVector<Value> storeVals = zipAsyncCopyValues(
-        rewriter, loc, vec, dstElems, dstPtrTy, maskElements, {}, i1_ty, {});
-
-    auto freeVarMasks = getFreeVariableMasks(dstTy);
-    Value threadPred =
-        emitRedundantThreadPredicate(freeVarMasks, rewriter, loc, targetInfo);
-
-    auto [laneId, warpId] = getLaneAndWarpId(rewriter, loc);
-    auto emitGlobalStoreLds =
-        [this, &op, &b, threadPred, dstPtrTy](
-            RewriterBase &rewriter, Location loc, ArrayRef<Value> storeValues,
-            Value shmemAddr, int startIdx, VectorType vecTy,
-            Value /*multicastMask*/) -> SmallVector<Value> {
-      auto [dstElem, maskElem, unused1, unused2] =
-          unzipAsyncCopyValues(rewriter, loc, startIdx, storeValues, dstPtrTy,
-                               i1_ty, false, vecTy.getNumElements());
-      int vecBits = vecTy.getNumElements() * vecTy.getElementTypeBitWidth();
-
-      // Predicate store based on threadPred && mask
-      auto cond = b.and_(threadPred, maskElem);
-      auto [storeBlock, afterStoreBlock] = emitBranch(rewriter, loc, cond);
-
-      emitAsyncStore(rewriter, loc, targetInfo, vecBits, dstElem, shmemAddr,
-                     op.getCache());
-
-      rewriter.setInsertionPointToStart(afterStoreBlock);
-
-      return {};
-    };
-
-    auto res = lowerDirectLDSAsyncCopy(rewriter, loc, dstTy, srcTy, storeVals,
-                                       llSrc, resElemTy, vec,
-                                       /*isLoad=*/false, emitGlobalStoreLds);
-    if (failed(res)) {
-      return failure();
-    }
-
-    // Drop the result token.
-    Value zero = LLVM::ConstantOp::create(rewriter, op.getLoc(),
-                                          IntegerType::get(op.getContext(), 32),
-                                          rewriter.getI32IntegerAttr(0));
-    rewriter.replaceOp(op, zero);
-    return success();
-  }
-
-  void emitAsyncStore(RewriterBase &rewriter, Location loc,
-                      NANO::TargetInfo targetInfo, int vecBits, Value dstPtr,
-                      Value shmemAddr, triton::CacheModifier cacheMod) const {
-    auto b = TritonLLVMOpBuilder(loc, rewriter);
-    assert(targetInfo.supportsDirectFromLdsStoreBitWidth(vecBits));
-    int32_t cacheModifiers =
-        mlir::LLVM::NANO::getCtrlBitsForCacheModifierOnTarget(
-            cacheMod, /*isLoad=*/false, targetInfo);
-
-    if (cacheMod != triton::CacheModifier::NONE) {
-      emitRemark(loc) << "cache modifiers not yet implemented on gfx1250";
-    }
-    std::string intrinsic =
-        "llvm.amdgcn.global.store.async.from.lds.b" + std::to_string(vecBits);
-    LLVM::createLLVMIntrinsicCallOp(
-        rewriter, loc, intrinsic, {},
-        {dstPtr, shmemAddr, b.i32_val(0), b.i32_val(cacheModifiers)});
-  }
-};
+// AsyncCopyLocalToGlobalOpConversion removed - TritonNANOGPU dialect not available
 
 struct StoreOpConversion : public ConvertOpToLLVMPattern<triton::StoreOp>,
                            public LoadStoreConversionBase {
@@ -1353,62 +1241,7 @@ struct AtomicRMWOpConversion
   }
 };
 
-struct AsyncWaitOpConversion
-    : public ConvertOpToLLVMPattern<nanogpu::AsyncWaitOp> {
-  AsyncWaitOpConversion(LLVMTypeConverter &converter,
-                        const NANO::TargetInfo &targetInfo,
-                        PatternBenefit benefit)
-      : ConvertOpToLLVMPattern(converter, benefit), targetInfo(targetInfo) {}
-
-  LogicalResult
-  matchAndRewrite(nanogpu::AsyncWaitOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto loc = op->getLoc();
-    auto b = TritonLLVMOpBuilder(loc, rewriter);
-
-    switch (targetInfo.getISAFamily()) {
-    case ISAFamily::CDNA1:
-    case ISAFamily::CDNA2:
-    case ISAFamily::CDNA3:
-    case ISAFamily::CDNA4: {
-      // global.load.lds uses vmcnt to synchronize
-      // The rocdl op stores all available counters in a single int32 value (v).
-      // The vmcnt (6 bits) is split into a lower 3:0 and higher 5:4 parts.
-      // The lower part is stored in bits 3:0 of v and the higher part in bits
-      // 15:14. We have to set all other bits in v to 1 to signal we are not
-      // interested in those.
-
-      // Clamp vmcnt to 6bits; a lower vmcnt will produce a conservative wait
-      unsigned vmCnt = std::min(63u, op.getNumInst());
-
-      // Extract low and high bits and combine while setting all other bits to 1
-      unsigned lowBits = vmCnt & 0xF;
-      unsigned highBits = vmCnt >> 4 << 14;
-      unsigned otherCnts = ~0xC00F; // C00F has bits 15:14 and 3:0 set
-      unsigned waitValue = lowBits | highBits | otherCnts;
-
-      ROCDL::SWaitcntOp::create(rewriter, loc, waitValue);
-      break;
-    }
-    case ISAFamily::GFX1250: {
-      // Clamp asyncCnt to 6bits(hw imit); lower means conservative
-      unsigned asyncCnt = std::min(63u, op.getNumInst());
-      ROCDL::WaitAsynccntOp::create(rewriter, loc, asyncCnt);
-      break;
-    }
-    default:
-      return rewriter.notifyMatchFailure(
-          op, "Only supported on CDNA target architecture");
-    }
-
-    // Drop the result AsyncToken
-    rewriter.replaceOp(op, b.i32_val(0));
-    return success();
-  }
-
-private:
-  const NANO::TargetInfo &targetInfo;
-};
+// AsyncWaitOpConversion removed - TritonNANOGPU dialect not available
 
 struct AsyncCommitGroupOpConversion
     : public ConvertOpToLLVMPattern<AsyncCommitGroupOp> {
@@ -1425,26 +1258,8 @@ struct AsyncCommitGroupOpConversion
   }
 };
 
-struct AsyncCopyMbarrierArriveOpConversion
-    : public ConvertOpToLLVMPattern<triton::nanogpu::AsyncCopyMbarrierArriveOp> {
-  using ConvertOpToLLVMPattern::ConvertOpToLLVMPattern;
+// AsyncCopyMbarrierArriveOpConversion removed - TritonNANOGPU dialect not available
 
-  LogicalResult
-  matchAndRewrite(triton::nanogpu::AsyncCopyMbarrierArriveOp op,
-                  OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override {
-    Location loc = op->getLoc();
-    TritonLLVMOpBuilder b(loc, rewriter);
-    auto smemObj = LLVM::getSharedMemoryObjectFromStruct(
-        loc, adaptor.getBarrier(),
-        typeConverter->convertType(op.getBarrier().getType().getElementType()),
-        rewriter);
-    auto newOp = ROCDL::DsAtomicAsyncBarrierArriveOp::create(rewriter, loc, {},
-                                                             smemObj.getBase());
-    rewriter.replaceOp(op, newOp);
-    return success();
-  }
-};
 } // namespace
 
 namespace mlir::triton::NANO {
@@ -1455,11 +1270,10 @@ void populateLoadStoreOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                        PatternBenefit benefit) {
   patterns.add<
       AtomicCASOpConversion, AtomicRMWOpConversion, LoadOpConversion,
-      StoreOpConversion,
-      AsyncCopyGlobalToLocalOpConversion, AsyncCopyLocalToGlobalOpConversion>(
+      StoreOpConversion, AsyncCopyGlobalToLocalOpConversion>(
       typeConverter, targetInfo, axisInfoAnalysis, benefit);
-  patterns.add<AsyncWaitOpConversion>(typeConverter, targetInfo, benefit);
+  // AsyncWaitOpConversion, AsyncCopyLocalToGlobalOpConversion, AsyncCopyMbarrierArriveOpConversion
+  // removed - TritonNANOGPU dialect not available
   patterns.add<AsyncCommitGroupOpConversion>(typeConverter, benefit);
-  patterns.add<AsyncCopyMbarrierArriveOpConversion>(typeConverter, benefit);
 }
 } // namespace mlir::triton::NANO

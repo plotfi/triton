@@ -1,6 +1,5 @@
 #include "Utility.h"
 #include "AsyncUtility.h"
-#include "Dialect/TritonNANOGPU/IR/Dialect.h"
 #include "TritonNANOGPUToLLVM/TargetUtils.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
@@ -405,17 +404,21 @@ Value emitCtaMulticastMask(RewriterBase &rewriter, Location loc, Value groupId,
 Value llLoad(RewriterBase &rewriter, Location loc, Value ptr, Type elemTy,
              Value pred, Value falseVal, Value multicastMask,
              triton::CacheModifier cm, bool forceNoAliasAsyncLoads) {
-  return triton::nanogpu::MaskedLoadOp::create(rewriter, loc, elemTy, ptr, pred,
-                                              falseVal, multicastMask, cm,
-                                              forceNoAliasAsyncLoads)
-      .getResult();
+  // Direct LLVM load - MaskedLoadOp removed with TritonNANOGPU dialect
+  TritonLLVMOpBuilder b(loc, rewriter);
+
+  // Simple case: unconditional load
+  auto load = LLVM::LoadOp::create(rewriter, loc, elemTy, ptr, /*alignment*/ 0);
+  // addLocalLoadNoAliasScope removed - not needed for minimal nano backend
+  return load.getResult();
 }
 
 void llStore(RewriterBase &rewriter, Location loc, Value ptr, Value val,
              Value pred, triton::CacheModifier cm,
              bool forceNoAliasAsyncLoads) {
-  triton::nanogpu::MaskedStoreOp::create(rewriter, loc, ptr, val, pred, cm,
-                                        forceNoAliasAsyncLoads);
+  // Direct LLVM store - MaskedStoreOp removed with TritonNANOGPU dialect
+  auto store = LLVM::StoreOp::create(rewriter, loc, val, ptr, /*alignment*/ 0);
+  // addLocalLoadNoAliasScope removed - not needed for minimal nano backend
 }
 
 // Create the auxiliary/cachepolicy value of ROCDL::RawPtrBufferLoad/StoreOp
@@ -730,8 +733,8 @@ bool isChainDotTail(tt::DotOpInterface dotOp) {
 SmallVector<Value> upcast8xMxfp4_SW(RewriterBase &rewriter, Operation *op,
                                     bool toFp16, Value packedVec,
                                     ISAFamily isaFamily, Value scale) {
-  assert((isa<triton::nanogpu::UpcastMXFPOp, triton::gpu::Fp4ToFpOp>(op)) &&
-         "Expected UpcastMXFPOp or Fp4ToFpOp");
+  assert((isa<triton::gpu::Fp4ToFpOp>(op)) &&
+         "Expected Fp4ToFpOp");
   Location loc = op->getLoc();
   auto b = TritonLLVMOpBuilder(loc, rewriter);
   auto permU32FnTy =

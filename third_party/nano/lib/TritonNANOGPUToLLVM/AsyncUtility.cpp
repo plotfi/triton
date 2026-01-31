@@ -1,6 +1,5 @@
 #include "AsyncUtility.h"
 
-#include "Dialect/TritonNANOGPU/IR/Dialect.h"
 #include "TargetInfo.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
@@ -14,7 +13,7 @@ constexpr const char *syncedViaAsyncWaitAttrName =
 // if all defining operations are an AsyncWait
 bool comesFromAsyncWait(Value token) {
   if (auto defOp = token.getDefiningOp()) {
-    return isa<triton::gpu::AsyncWaitOp, nanogpu::AsyncWaitOp>(defOp);
+    return isa<triton::gpu::AsyncWaitOp>(defOp);
   }
 
   auto blockArg = dyn_cast<BlockArgument>(token);
@@ -56,8 +55,7 @@ void annotateLocalLoadsSyncedViaAsyncWait(ModuleOp mod) {
 
   mod->walk([&](Operation *op) {
     TypeSwitch<Operation *, void>(op)
-        .Case<triton::gpu::LocalLoadOp,
-              triton::nanogpu::LocalLoadPackedTransposedOp>([&](auto loadOp) {
+        .Case<triton::gpu::LocalLoadOp>([&](auto loadOp) {
           if (loadOp->hasAttr(syncedViaAsyncWaitAttrName))
             return;
           Value token = loadOp.getToken();
@@ -113,27 +111,7 @@ void addAsyncCopyAliasScope(LLVM::AliasAnalysisOpInterface directToLdsOp) {
   directToLdsOp.setAliasScopes(b.getArrayAttr(getAsyncCopyScope(ctx)));
 }
 
-void addLocalLoadNoAliasScope(Operation *localLoadOp,
-                              LLVM::AliasAnalysisOpInterface llLoadOp) {
-  if (!localLoadOp->hasTrait<OpTrait::LocalLoadTrait>())
-    return;
-  if (!isSyncedViaAsyncWait(localLoadOp))
-    return;
-
-  return addLocalLoadNoAliasScope(llLoadOp);
-}
-
-void addLocalLoadNoAliasScope(LLVM::AliasAnalysisOpInterface llLoadOp) {
-  auto ctx = llLoadOp->getContext();
-
-  // Do not alias with AsyncCopies
-  auto noAliasScopes = ArrayAttr::get(ctx, getAsyncCopyScope(ctx));
-  llLoadOp.setNoAliasScopes(noAliasScopes);
-
-  // Add to different scope as ops without any scope alias with everything
-  auto aliasScopes = ArrayAttr::get(ctx, getLoadCopyScope(ctx));
-  llLoadOp.setAliasScopes(aliasScopes);
-}
+// addLocalLoadNoAliasScope removed - not needed for minimal nano backend
 
 unsigned
 fitToValidDirectToLdsVecSize(unsigned maxVecSize, unsigned elemBitwidth,
