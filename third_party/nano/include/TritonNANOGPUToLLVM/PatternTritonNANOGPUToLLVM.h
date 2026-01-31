@@ -6,9 +6,8 @@
 
 namespace mlir::triton::NANO {
 
-void populateExtractSliceOpToLLVMPatterns(
-    mlir::LLVMTypeConverter &typeConverter, mlir::RewritePatternSet &patterns,
-    mlir::PatternBenefit benefit);
+// All NANO dialect ops have been removed for minimal vector add backend.
+// This header is kept for API compatibility.
 
 } // namespace mlir::triton::NANO
 

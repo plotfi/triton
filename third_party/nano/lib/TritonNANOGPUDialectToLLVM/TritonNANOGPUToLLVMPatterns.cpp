@@ -6,6 +6,7 @@ void populateTritonNANOGPUToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                         RewritePatternSet &patterns,
                                         const NANO::TargetInfo &targetInfo,
                                         PatternBenefit benefit) {
-  populateExtractSliceOpToLLVMPatterns(typeConverter, patterns, benefit);
+  // All NANO dialect ops have been removed for minimal vector add backend.
+  // No patterns to add.
 }
 } // namespace mlir::triton::NANO
