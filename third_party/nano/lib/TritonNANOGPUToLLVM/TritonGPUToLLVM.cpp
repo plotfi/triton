@@ -1,6 +1,5 @@
 #include "TritonNANOGPUToLLVM/Passes.h"
 
-#include "AsyncUtility.h"
 #include "PatternTritonGPUOpToLLVM.h"
 #include "TargetInfo.h"
 #include "TritonNANOGPUToLLVM/MembarUtility.h"
@@ -100,9 +99,6 @@ struct ConvertTritonNANOGPUToLLVM
 
     // Allocate shared memory and set barrier
     ModuleAllocation allocation(mod);
-
-    if (targetInfo.requiresAliasInfoForAsyncOps())
-      NANO::annotateLocalLoadsSyncedViaAsyncWait(mod);
 
     ModuleMembarAnalysis membarPass(&allocation,
                                     mlir::triton::NANO::membarFilter);
@@ -204,9 +200,6 @@ struct ConvertTritonNANOGPUToLLVM
                                               targetInfo, commonBenefit);
 
     // TritonNANOGPU dialect patterns removed - not needed for minimal backend
-    // mlir::triton::NANO::populateTritonNANOGPUToLLVMPatterns(...)
-    // mlir::triton::NANO::populateUpcastMXFPToLLVMPatterns(...)
-    // mlir::triton::NANO::populateFp4ToFpToLLVMPatterns(...)
 
     // TODO(thomas): this should probably be done in a separate step to not
     // interfere with our own lowering of arith ops. Add arith/math's patterns

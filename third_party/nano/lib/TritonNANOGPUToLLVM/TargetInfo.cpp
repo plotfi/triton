@@ -1,7 +1,6 @@
 #include "TargetInfo.h"
 #include "TritonNANOGPUToLLVM/TargetUtils.h"
 #include "Utility.h"
-#include "nano/lib/TritonNANOGPUToLLVM/AsyncUtility.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "triton/Conversion/TritonGPUToLLVM/Utility.h"
@@ -157,8 +156,7 @@ Value TargetInfo::loadDShared(RewriterBase &rewriter, Location loc, Value ptr,
   }
   Value falseVal = LLVM::ConstantOp::create(rewriter, loc, elemTy,
                                             rewriter.getZeroAttr(elemTy));
-  bool addAliasGroup = localLoadOp && requiresAliasInfoForAsyncOps() &&
-                       isSyncedViaAsyncWait(localLoadOp);
+  bool addAliasGroup = false;
   return mlir::LLVM::NANO::llLoad(rewriter, loc, ptr, elemTy, pred, falseVal, {},
                                  triton::CacheModifier::NONE, addAliasGroup);
 }

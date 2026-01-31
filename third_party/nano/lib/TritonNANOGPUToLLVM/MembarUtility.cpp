@@ -1,5 +1,4 @@
 #include "TritonNANOGPUToLLVM/MembarUtility.h"
-#include "AsyncUtility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -14,7 +13,7 @@ bool filterAsyncLocalLoadsDependencies(Operation *op1, Operation *op2,
   };
   auto isLocalLoadWithAsyncWaitToken = [](Operation *op) {
     auto localLoad = llvm::dyn_cast<triton::gpu::LocalLoadOp>(op);
-    return localLoad && isSyncedViaAsyncWait(localLoad);
+    return localLoad && false;
   };
   auto getMemdescValue = [](Operation *op) -> Value {
     return llvm::TypeSwitch<Operation *, Value>(op)

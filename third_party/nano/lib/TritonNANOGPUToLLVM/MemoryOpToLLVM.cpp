@@ -1,4 +1,3 @@
-#include "AsyncUtility.h"
 // TritonNANOGPU dialect removed - not needed for minimal nano backend
 #include "PatternTritonGPUOpToLLVM.h"
 #include "TritonNANOGPUToLLVM/TargetUtils.h"

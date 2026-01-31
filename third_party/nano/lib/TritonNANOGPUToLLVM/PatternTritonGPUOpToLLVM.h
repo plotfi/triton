@@ -38,11 +38,6 @@ void populateTritonNANOGPUToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                         const NANO::TargetInfo &,
                                         PatternBenefit benefit);
 
-void populateUpcastMXFPToLLVMPatterns(LLVMTypeConverter &typeConverter,
-                                      RewritePatternSet &patterns,
-                                      const TargetInfo &targetInfo,
-                                      PatternBenefit benefit);
-
 void populateTensorPtrOpsToLLVMPatterns(LLVMTypeConverter &typeConverter,
                                         RewritePatternSet &patterns,
                                         PatternBenefit benefit);

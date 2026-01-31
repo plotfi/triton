@@ -1,5 +1,4 @@
 #include "TritonNANOGPUToLLVM/MembarUtility.h"
-#include "nano/lib/TritonNANOGPUToLLVM/AsyncUtility.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Analysis/Allocation.h"
@@ -22,7 +21,6 @@ struct TestNANOGPUMembarPass
 
   void runOnOperation() override {
     ModuleOp moduleOp = getOperation();
-    triton::NANO::annotateLocalLoadsSyncedViaAsyncWait(moduleOp);
     // Print all ops after membar pass
     ModuleAllocation allocation(moduleOp);
     ModuleMembarAnalysis membarPass(&allocation, triton::NANO::membarFilter);

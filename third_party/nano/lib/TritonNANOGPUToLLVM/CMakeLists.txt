@@ -1,5 +1,4 @@
 add_triton_library(TritonNANOGPUToLLVM
-    AsyncUtility.cpp
     AtomicRMWOpsEmitter.cpp
     AllocateSharedMemory.cpp
     TensorPtrOpsToLLVM.cpp
@@ -12,7 +11,6 @@ add_triton_library(TritonNANOGPUToLLVM
     Utility.cpp
     TargetInfo.cpp
     TargetUtils.cpp
-    UpcastMXFPToLLVM.cpp
     MembarUtility.cpp
     ScalarizePackedFOps.cpp
     WarpIdOpToLLVM.cpp

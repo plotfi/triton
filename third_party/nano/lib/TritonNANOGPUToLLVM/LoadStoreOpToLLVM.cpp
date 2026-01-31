@@ -1,4 +1,3 @@
-#include "AsyncUtility.h"
 #include "AtomicRMWOpsEmitter.h"
 // TritonNANOGPU dialect removed - not needed for minimal nano backend
 #include "PatternTritonGPUOpToLLVM.h"
@@ -781,8 +780,7 @@ struct AsyncCopyGlobalToLocalOpConversion
       auto globalLoadLdsOp = ROCDL::GlobalLoadLDSOp::create(
           rewriter, loc, srcPtr, shmemAddr, vecBits / 8,
           /*offset=*/0, cacheModifiers, nullptr, nullptr, nullptr);
-      if (targetInfo.requiresAliasInfoForAsyncOps())
-        NANO::addAsyncCopyAliasScope(globalLoadLdsOp);
+      (void)globalLoadLdsOp;
     } else if (targetInfo.getISAFamily() == ISAFamily::GFX1250) {
       if (cacheMod != triton::CacheModifier::NONE) {
         emitRemark(loc) << "cache modifiers not yet implemented on gfx1250";

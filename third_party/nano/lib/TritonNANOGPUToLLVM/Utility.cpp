@@ -1,5 +1,4 @@
 #include "Utility.h"
-#include "AsyncUtility.h"
 #include "TritonNANOGPUToLLVM/TargetUtils.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
@@ -640,7 +639,8 @@ bool canLoadDirectToLDS(const triton::NANO::TargetInfo &targetInfo,
 
   // Check that vectorSize is not smaller than the minimal supported vector size
   int elemBitWidth = tt::getPointeeBitWidth(srcTy);
-  if (fitToValidDirectToLdsVecSize(vectorSize, elemBitWidth, targetInfo) == 0) {
+  // fitToValidDirectToLdsVecSize removed - disable direct to LDS for minimal backend
+  if (0 == 0) {
     LDBG("unsupported global load to LDS vectorSize (" << vectorSize << ")");
     return false;
   }
