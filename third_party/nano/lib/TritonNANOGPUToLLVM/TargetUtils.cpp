@@ -6,9 +6,6 @@ namespace mlir::triton::NANO {
 ISAFamily deduceISAFamily(llvm::StringRef arch) {
   llvm::AMDGPU::GPUKind kind = llvm::AMDGPU::parseArchAMDGCN(arch);
 
-  // See https://llvm.org/docs/AMDGPUUsage.html#processors for how to categorize
-  // the following target gfx architectures.
-
   if (kind == llvm::AMDGPU::GK_GFX1250)
     return ISAFamily::GFX1250;
 

@@ -50,9 +50,6 @@ public:
     // Number of elements that the instruction needs to be contiguous in LDS
     unsigned tileSize;
   };
-  // Get the ds_read_tr parameters for the instruction that operates on the
-  // element granularty specified by bitWidth
-  std::optional<LDSTransLoadParams> queryLDSTransLoadParams(int bitWidth) const;
 
   Value shuffleXor(RewriterBase &rewriter, Location loc, Value val,
                    int i) const override;

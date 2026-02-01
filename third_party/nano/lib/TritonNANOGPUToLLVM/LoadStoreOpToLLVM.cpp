@@ -171,12 +171,13 @@ struct LoadOpConversion : public ConvertOpToLLVMPattern<triton::LoadOp>,
 
     Value multicastMask;
     if (targetInfo.supportsMultiCTALaunch()) {
-      if (auto tensorTy = dyn_cast<RankedTensorType>(ptr.getType())) {
-        Value clusterCTAId = targetInfo.getClusterCTAId(rewriter, loc);
-        auto regLayout = triton::gpu::toLinearLayout(tensorTy);
-        multicastMask = LLVM::NANO::emitCtaMulticastMask(
-            rewriter, loc, clusterCTAId, regLayout);
-      }
+      assert(false && "Do not have suppport for multi CTA launch for loads in nano backend");
+      // if (auto tensorTy = dyn_cast<RankedTensorType>(ptr.getType())) {
+      //   Value clusterCTAId = targetInfo.getClusterCTAId(rewriter, loc);
+      //   auto regLayout = triton::gpu::toLinearLayout(tensorTy);
+      //   multicastMask = LLVM::NANO::emitCtaMulticastMask(
+      //       rewriter, loc, clusterCTAId, regLayout);
+      // }
     }
 
     // vectorized iteration through all the pointer/mask/other elements
