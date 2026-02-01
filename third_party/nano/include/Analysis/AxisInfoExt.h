@@ -1,5 +1,5 @@
-#ifndef TRITONAMD_ANALYSIS_AXIS_INFO_EXT_H
-#define TRITONAMD_ANALYSIS_AXIS_INFO_EXT_H
+#ifndef TRITONNANO_ANALYSIS_AXIS_INFO_EXT_H
+#define TRITONNANO_ANALYSIS_AXIS_INFO_EXT_H
 
 #include "include/triton/Analysis/AxisInfo.h"
 
@@ -17,4 +17,4 @@ public:
 };
 } // namespace mlir::triton::NANO
 
-#endif
+#endif // TRITONNANO_ANALYSIS_AXIS_INFO_EXT_H

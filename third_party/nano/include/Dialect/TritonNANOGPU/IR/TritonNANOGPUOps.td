@@ -22,7 +22,7 @@ include "TritonNANOGPUDialect.td"
 include "TritonNANOGPUAttrDefs.td"
 
 
-class TT_AMDGPU_Op<string mnemonic, list<Trait> traits = []> :
+class TT_NANO_Op<string mnemonic, list<Trait> traits = []> :
     Op<TritonNANOGPU_Dialect, mnemonic, !listconcat(traits, [])>;
 
 // All operators have been removed for minimal vector add backend.

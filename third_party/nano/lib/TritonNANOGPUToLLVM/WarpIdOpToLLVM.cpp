@@ -27,11 +27,6 @@ public:
   matchAndRewrite(WarpIdOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
-    // These are runtime constant values so insert ops at the beginning of the
-    // function to help LLVM uniformity analysis, unless we are in a warp
-    // specialized partition region where we need to keep ops in their
-    // respective regions.
     std::optional<int> startWarpId = getWarpGroupStartWarpId(op->getBlock());
     if (!startWarpId) {
       auto funcOp = op->getParentOfType<FunctionOpInterface>();

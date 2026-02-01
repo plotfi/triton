@@ -3,7 +3,7 @@
 
 include "mlir/Pass/PassBase.td"
 
-def ConvertTritonNANOGPUToLLVM : Pass<"convert-triton-amdgpu-to-llvm", "mlir::ModuleOp"> {
+def ConvertTritonNANOGPUToLLVM : Pass<"convert-triton-nanogpu-to-llvm", "mlir::ModuleOp"> {
     let summary = "Convert TritonGPU to LLVM";
     let constructor = "mlir::triton::createConvertTritonNANOGPUToLLVMPass(\"\", /*ftz=*/true)";
 

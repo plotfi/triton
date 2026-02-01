@@ -1,6 +1,5 @@
 add_triton_library(TritonNANOAnalysis
   AxisInfoExt.cpp
-  NANOGPUAllocation.cpp
 
   DEPENDS
   TritonTableGen

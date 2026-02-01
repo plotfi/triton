@@ -14,6 +14,7 @@
 #include "triton/Dialect/TritonGPU/IR/Attributes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #include "triton/Tools/LayoutUtils.h"
+#include "llvm/Support/ErrorHandling.h"
 
 using namespace mlir;
 using namespace mlir::triton::gpu;
@@ -171,7 +172,7 @@ struct LoadOpConversion : public ConvertOpToLLVMPattern<triton::LoadOp>,
 
     Value multicastMask;
     if (targetInfo.supportsMultiCTALaunch()) {
-      assert(false && "Do not have suppport for multi CTA launch for loads in nano backend");
+      llvm_unreachable("Do not have suppport for multi CTA launch for loads in nano backend");
       // if (auto tensorTy = dyn_cast<RankedTensorType>(ptr.getType())) {
       //   Value clusterCTAId = targetInfo.getClusterCTAId(rewriter, loc);
       //   auto regLayout = triton::gpu::toLinearLayout(tensorTy);
