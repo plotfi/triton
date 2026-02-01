@@ -22,7 +22,6 @@ enum class ISAFamily {
 // Deduces the corresponding ISA family for the given target gfx |arch|.
 ISAFamily deduceISAFamily(llvm::StringRef arch);
 
-bool supportsVDot(llvm::StringRef arch);
 bool isCDNA(ISAFamily isaFamily);
 bool isRDNA(ISAFamily isaFamily);
 

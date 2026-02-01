@@ -7,11 +7,9 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "triton/Dialect/TritonGPU/IR/LinearLayoutConversions.h"
-namespace tt = mlir::triton;
 using mlir::triton::ModuleAxisInfoAnalysis;
 using mlir::triton::NANO::DppCtrl;
 using mlir::triton::NANO::ISAFamily;
-using mlir::triton::gpu::appendOrGetExternFuncOp;
 
 namespace {
 enum class ShflKind : uint32_t {
@@ -354,12 +352,6 @@ static int32_t getDefaultCtrlBitsForCacheModifier(triton::CacheModifier cm) {
   return 0;
 }
 
-Value cvtFp32ToFp16RTNE_oneValue(Location loc, RewriterBase &rewriter,
-                                 const Value &v) {
-  LLVM::RoundingMode rm = LLVM::RoundingMode::NearestTiesToEven;
-  return LLVM::FPTruncOp::create(rewriter, loc, f16_ty, v);
-}
-
 Type getPointerTypeWithShape(Value basePtr, Value offset) {
   Type basePtrType = basePtr.getType();
   auto offsetType = cast<RankedTensorType>(offset.getType());
@@ -420,67 +412,6 @@ unsigned getVectorSize(Value ptr, Value offset,
   auto contiguity = getContiguity(ptr, offset, axisAnalysisPass);
   auto pointeeBitWidth = triton::getPointeeBitWidth(ptr.getType());
   return std::min<unsigned>(128 / pointeeBitWidth, contiguity);
-}
-
-Type scaleDotElemTypeToMLIRType(MLIRContext *ctx, triton::ScaleDotElemType t) {
-  switch (t) {
-  case triton::ScaleDotElemType::FP16:
-    return Float16Type::get(ctx);
-  case triton::ScaleDotElemType::BF16:
-    return BFloat16Type::get(ctx);
-  case triton::ScaleDotElemType::E4M3:
-    return Float8E4M3FNType::get(ctx);
-  case triton::ScaleDotElemType::E5M2:
-    return Float8E5M2Type::get(ctx);
-  case triton::ScaleDotElemType::E3M2:
-    return Float6E3M2FNType::get(ctx);
-  case triton::ScaleDotElemType::E2M3:
-    return Float6E2M3FNType::get(ctx);
-  case triton::ScaleDotElemType::E2M1:
-    return Float4E2M1FNType::get(ctx);
-  default:
-    llvm_unreachable("unsupported ScaleDotElemType!");
-  }
-}
-
-bool isChainDotHead(tt::DotOpInterface dotOp, unsigned opIdx) {
-  auto isInSameRegion = [&dotOp](Operation *op) {
-    return op->getParentRegion() == dotOp->getParentRegion();
-  };
-  ForwardSliceOptions fwdOpt;
-  fwdOpt.filter = isInSameRegion;
-  SetVector<mlir::Operation *> fwdSlices;
-  getForwardSlice(dotOp, &fwdSlices, fwdOpt);
-  for (Operation *op : fwdSlices) {
-    if (auto dOp = dyn_cast<tt::DotOpInterface>(op)) {
-      assert(dOp != dotOp);
-      Operation *dotOperand = (opIdx == 0) ? dOp.getA().getDefiningOp()
-                                           : dOp.getB().getDefiningOp();
-      if (dotOperand && fwdSlices.contains(dotOperand)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-bool isChainDotTail(tt::DotOpInterface dotOp) {
-  auto isInSameRegion = [&dotOp](Operation *op) {
-    return op->getParentRegion() == dotOp->getParentRegion();
-  };
-  BackwardSliceOptions bwdOpt;
-  bwdOpt.omitBlockArguments = true;
-  bwdOpt.filter = isInSameRegion;
-  SetVector<Operation *> bwdSlices;
-  Operation *opA = dotOp.getA().getDefiningOp();
-  if (!opA)
-    return false;
-  (void)getBackwardSlice(opA, &bwdSlices, bwdOpt);
-  if (llvm::find_if(bwdSlices, [](Operation *op) {
-        return isa<tt::DotOpInterface>(op);
-      }) != bwdSlices.end())
-    return true;
-  return false;
 }
 
 } // namespace mlir::LLVM::NANO

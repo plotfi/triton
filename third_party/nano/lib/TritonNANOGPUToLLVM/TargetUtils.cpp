@@ -36,22 +36,6 @@ ISAFamily deduceISAFamily(llvm::StringRef arch) {
   return ISAFamily::Unknown;
 }
 
-bool supportsVDot(llvm::StringRef arch) {
-  switch (deduceISAFamily(arch)) {
-  case NANO::ISAFamily::CDNA1:
-  case NANO::ISAFamily::CDNA2:
-  case NANO::ISAFamily::CDNA3:
-  case NANO::ISAFamily::CDNA4:
-  case NANO::ISAFamily::RDNA2:
-  case NANO::ISAFamily::RDNA3:
-  case NANO::ISAFamily::RDNA4:
-    return true;
-  default:
-    break;
-  }
-  return false;
-}
-
 bool isCDNA(ISAFamily isaFamily) {
   switch (isaFamily) {
   case ISAFamily::CDNA1:

@@ -55,9 +55,6 @@ void llStore(RewriterBase &rewriter, Location loc, Value ptr, Value val,
 // Get flags <volatile, nontemporal> for a predicated Load or Store
 std::pair<bool, bool> getCacheModifierFlagsForLoadStore(LLVM::CallOp);
 
-Value cvtFp32ToFp16RTNE_oneValue(Location loc, RewriterBase &rewriter,
-                                 const Value &v);
-
 // Return a tensor of pointers with the same type of `basePtr` and the same
 // shape of `offset`
 Type getPointerTypeWithShape(Value basePtr, Value offset);
@@ -75,16 +72,6 @@ unsigned getVectorSize(Value ptr, ModuleAxisInfoAnalysis &axisAnalysisPass);
 // Given a scalar pointer and a tensor of offsets, determine the vector size
 unsigned getVectorSize(Value ptr, Value offset,
                        ModuleAxisInfoAnalysis &axisAnalysisPass);
-
-Type scaleDotElemTypeToMLIRType(MLIRContext *ctx, triton::ScaleDotElemType t);
-
-// Check if the result of this tl.dot is used as opA or opB of another tl.dot
-// in the same region
-bool isChainDotHead(mlir::triton::DotOpInterface dotOp, unsigned opIdx = 0);
-
-// Check if the opA of this tl.dot is the result of another tl.dot
-// in the same region
-bool isChainDotTail(mlir::triton::DotOpInterface dotOp);
 
 } // namespace mlir::LLVM::NANO
 
