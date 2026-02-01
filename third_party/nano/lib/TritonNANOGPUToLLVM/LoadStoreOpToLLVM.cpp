@@ -26,8 +26,6 @@ using ::mlir::triton::gpu::getTotalElemsPerThread;
 
 namespace {
 
-// Return a predicate that is true only if the current thread holds unique data,
-// according to freeVarsMask.
 Value emitRedundantThreadPredicate(
     const llvm::MapVector<StringAttr, int32_t> &freeVarMasks,
     ConversionPatternRewriter &rewriter, Location loc,
@@ -73,16 +71,12 @@ struct LoadStoreConversionBase {
     return zeroVal;
   }
 
-  // Given a vector of values `elems` and a starting point `start`, create a
-  // LLVM vector of length `vec` whose elements are `elems[start, ...,
-  // elems+vec-1]`
   Value packElementRangeIntoVector(RewriterBase &rewriter,
                                    const LLVMTypeConverter *typeConverter,
                                    Location loc, VectorType vecTy,
                                    ArrayRef<Value> elems, int64_t start) const {
     auto b = TritonLLVMOpBuilder(loc, rewriter);
     int64_t vec = vecTy.getNumElements();
-    // If we need to mask the loaded value with other elements
     Value v = b.undef(vecTy);
     for (size_t s = 0; s < vec; ++s) {
       Value otherElem = elems[start + s];
@@ -93,17 +87,12 @@ struct LoadStoreConversionBase {
     return v;
   }
 
-  // Return a tensor of pointers with the same type of `basePtr` and the same
-  // shape of `offset`
   Type getPointerTypeWithShape(Value basePtr, Value offset) const {
     Type basePtrType = basePtr.getType();
     auto offsetType = cast<RankedTensorType>(offset.getType());
     return offsetType.cloneWith(std::nullopt, basePtrType);
   }
 
-  // Unpack the elements contained in a `llvmStruct` into a `SmallVector` of
-  // `Value`s. While you do that, check also the alignment of the mask and
-  // update the vector length `vec` accordingly
   SmallVector<Value>
   getMaskElemsAndUpdateVeclen(ConversionPatternRewriter &rewriter, Location loc,
                               Value llMask, Value mask, unsigned &vec) const {
@@ -173,12 +162,6 @@ struct LoadOpConversion : public ConvertOpToLLVMPattern<triton::LoadOp>,
     Value multicastMask;
     if (targetInfo.supportsMultiCTALaunch()) {
       llvm_unreachable("Do not have suppport for multi CTA launch for loads in nano backend");
-      // if (auto tensorTy = dyn_cast<RankedTensorType>(ptr.getType())) {
-      //   Value clusterCTAId = targetInfo.getClusterCTAId(rewriter, loc);
-      //   auto regLayout = triton::gpu::toLinearLayout(tensorTy);
-      //   multicastMask = LLVM::NANO::emitCtaMulticastMask(
-      //       rewriter, loc, clusterCTAId, regLayout);
-      // }
     }
 
     // vectorized iteration through all the pointer/mask/other elements

@@ -1,10 +1,9 @@
 // Minimal ElementwiseOpToLLVM.cpp - Only what's needed for f32 vector add
- #include "TargetInfo.h"
+#include "TargetInfo.h"
 #include "TritonNANOGPUToLLVM/TargetUtils.h"
 #include "Utility.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
-#include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "triton/Analysis/Allocation.h"
 #include "triton/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVMBase.h"

@@ -37,7 +37,7 @@ Value TargetInfo::getClusterCTAId(RewriterBase &rewriter, Location loc) const {
 
 Value TargetInfo::ballot(RewriterBase &rewriter, Location loc, Type type,
                          Value cmp) const {
-  return ROCDL::BallotOp::create(rewriter, loc, type, cmp);
+  llvm_unreachable("ballot not supported");
 }
 
 void TargetInfo::barrier(Location loc, RewriterBase &rewriter,

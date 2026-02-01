@@ -1,6 +1,5 @@
 #include "Utility.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
-#include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
 #include "mlir/IR/PatternMatch.h"
 #include "triton/Conversion/TritonGPUToLLVM/Utility.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -13,32 +12,10 @@ namespace mlir::LLVM::NANO {
 Value llGetPid(Location loc, RewriterBase &rewriter, ModuleOp moduleOp,
                ProgramIDDim axis) {
   assert(moduleOp);
-
-  int numCTAs = triton::gpu::TritonGPUDialect::getNumCTAs(moduleOp);
-  if (numCTAs == 1) {
-    // For single CTA the block id is the program id
-    Value blockId = ::mlir::gpu::BlockIdOp::create(rewriter, loc,
-                                                   mlir::gpu::Dimension(axis));
-    return arith::IndexCastOp::create(rewriter, loc, i32_ty, blockId);
-  }
-  // For multiple CTAs the cluster id is the program id
-  Type resType = rewriter.getI32Type();
-  Value clusterIdx = nullptr;
-  switch (axis) {
-  case ProgramIDDim::X: {
-    clusterIdx = ROCDL::ClusterIdXOp::create(rewriter, loc, resType);
-    break;
-  }
-  case ProgramIDDim::Y: {
-    clusterIdx = ROCDL::ClusterIdYOp::create(rewriter, loc, resType);
-    break;
-  }
-  case ProgramIDDim::Z: {
-    clusterIdx = ROCDL::ClusterIdZOp::create(rewriter, loc, resType);
-    break;
-  }
-  }
-  return clusterIdx;
+  // Single CTA only - block id is the program id
+  Value blockId = ::mlir::gpu::BlockIdOp::create(rewriter, loc,
+                                                 mlir::gpu::Dimension(axis));
+  return arith::IndexCastOp::create(rewriter, loc, i32_ty, blockId);
 }
 
 Value llLoad(RewriterBase &rewriter, Location loc, Value ptr, Type elemTy,
