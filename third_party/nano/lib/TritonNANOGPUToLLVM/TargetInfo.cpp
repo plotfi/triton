@@ -1,63 +1,10 @@
+// Minimal TargetInfo.cpp - Only what's needed for vector add
 #include "TargetInfo.h"
-#include "TritonNANOGPUToLLVM/TargetUtils.h"
 #include "Utility.h"
-#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "triton/Conversion/TritonGPUToLLVM/Utility.h"
 
-using mlir::triton::NANO::DppCtrl;
 namespace mlir::triton::NANO {
-
-namespace {
-template <typename T>
-LLVM::LLVMFuncOp getOrInsertFunction(T &moduleOp, const Location loc,
-                                     RewriterBase &rewriter, StringRef name,
-                                     LLVM::LLVMFunctionType type) {
-  LLVM::LLVMFuncOp ret;
-  if (!(ret = moduleOp.template lookupSymbol<LLVM::LLVMFuncOp>(name))) {
-    RewriterBase::InsertionGuard guard(rewriter);
-    rewriter.setInsertionPointToStart(moduleOp.getBody());
-    ret = LLVM::LLVMFuncOp::create(rewriter, loc, name, type,
-                                   LLVM::Linkage::External);
-  }
-  return ret;
-}
-
-// Extend all values to 64-bit per printf call requirements.
-Value printfPromoteValue(RewriterBase &rewriter, Value value, bool isSigned) {
-  auto *context = rewriter.getContext();
-  auto loc = UnknownLoc::get(context);
-  auto b = TritonLLVMOpBuilder(loc, rewriter);
-  auto type = value.getType();
-
-  if (isa<LLVM::LLVMPointerType>(type)) {
-    // The llvm.ptrtoint op requires signless integer types.
-    return b.ptrtoint(i64_ty, value);
-  }
-
-  assert(type.getIntOrFloatBitWidth() <= 64);
-
-  if (auto floatType = dyn_cast<FloatType>(type)) {
-    Value newValue = value;
-    if (!floatType.isF64())
-      newValue = b.fpext(f64_ty, newValue);
-    return b.bitcast(newValue, i64_ty);
-  }
-
-  assert(type.isIntOrIndex());
-  if (type.getIntOrFloatBitWidth() < 64) {
-    if (isSigned) {
-      return b.sext(i64_ty, value);
-    } else {
-      // Signless and unsigned integers are printed using unsigned integer
-      // formats.
-      return b.zext(i64_ty, value);
-    }
-  }
-
-  return value;
-}
-} // namespace
 
 llvm::AMDGPU::IsaVersion TargetInfo::getIsaVersion() const {
   return llvm::AMDGPU::getIsaVersion(arch);
@@ -83,7 +30,6 @@ int TargetInfo::getWarpSize() const {
 }
 
 int TargetInfo::getSharedMemorySize() const {
-  // Should return the maximum capacity in kbyte
   switch (getISAFamily()) {
   case ISAFamily::GFX1250:
     return 320 * 1024;
@@ -99,11 +45,7 @@ bool TargetInfo::supportMaximumMinimum() const {
 }
 
 Value TargetInfo::getClusterCTAId(RewriterBase &rewriter, Location loc) const {
-  if (triton::gpu::lookupNumCTAs(&rewriter.getInsertionBlock()->front()) == 1)
-    return arith::ConstantIntOp::create(rewriter, loc, 0, 32);
-
-  // We dispatch only along x; return the workgroup id x
-  return ROCDL::ClusterIdXOp::create(rewriter, loc, rewriter.getI32Type());
+  return arith::ConstantIntOp::create(rewriter, loc, 0, 32);
 }
 
 Value TargetInfo::ballot(RewriterBase &rewriter, Location loc, Type type,
@@ -141,37 +83,33 @@ Value TargetInfo::loadDShared(RewriterBase &rewriter, Location loc, Value ptr,
   }
   Value falseVal = LLVM::ConstantOp::create(rewriter, loc, elemTy,
                                             rewriter.getZeroAttr(elemTy));
-  bool addAliasGroup = false;
-  return mlir::LLVM::NANO::llLoad(rewriter, loc, ptr, elemTy, pred, falseVal, {},
-                                 triton::CacheModifier::NONE, addAliasGroup);
+  return mlir::LLVM::NANO::llLoad(rewriter, loc, ptr, elemTy, pred, falseVal,
+                                  {}, triton::CacheModifier::NONE, false);
 }
 
 Value TargetInfo::shuffleXor(RewriterBase &rewriter, Location loc, Value val,
                              int i) const {
-  return LLVM::NANO::shuffleXor(loc, rewriter, val, i, getISAFamily());
+  llvm_unreachable("shuffleXor not supported in minimal NANO backend");
 }
 
 Value TargetInfo::shuffleUp(RewriterBase &rewriter, Location loc, Value val,
                             int i) const {
-  return LLVM::NANO::shuffleUp(loc, rewriter, val, i, getISAFamily());
+  llvm_unreachable("shuffleUp not supported in minimal NANO backend");
 }
 
 Value TargetInfo::shuffleIdx(RewriterBase &rewriter, Location loc, Value val,
                              int i) const {
-  return LLVM::NANO::shuffleIdx(loc, rewriter, val, i, getISAFamily());
+  llvm_unreachable("shuffleIdx not supported in minimal NANO backend");
 }
 
 Value TargetInfo::shuffleIdx(RewriterBase &rewriter, Location loc, Value val,
                              Value i) const {
-  return LLVM::NANO::shuffleIdx(loc, rewriter, val, i, getISAFamily());
+  llvm_unreachable("shuffleIdx not supported in minimal NANO backend");
 }
 
 Value TargetInfo::permute(RewriterBase &rewriter, Location loc, Value a,
                           Value b, Value selector) const {
-  // Warning: The `a` and `b` operands are ordered to align with Nvidia's `prmt`
-  // Both use little-endian ordering, but AMD puts the MSBs of the data in the
-  // 0-th operand.
-  return LLVM::NANO::permute(loc, rewriter, b, a, selector);
+  llvm_unreachable("permute not supported in minimal NANO backend");
 }
 
 Value TargetInfo::programId(RewriterBase &rewriter, Location loc,
@@ -179,450 +117,93 @@ Value TargetInfo::programId(RewriterBase &rewriter, Location loc,
   return LLVM::NANO::llGetPid(loc, rewriter, moduleOp, axis);
 }
 
-// Cast and sext values into specific-length int to meet the requirements of
-// instructions like UpdateDpp or readlane if necessary.
-static inline Type castToAndSExtInt(RewriterBase &rewriter, Location loc,
-                                    Value &val, Type fromType,
-                                    unsigned toBits) {
-  auto b = TritonLLVMOpBuilder(loc, rewriter);
-  unsigned originalBits = fromType.getIntOrFloatBitWidth();
-  Type toType = fromType;
-
-  if (!fromType.isIntOrIndex()) {
-    val = b.bitcast(val, int_ty(originalBits));
-    toType = int_ty(originalBits);
-  }
-
-  if (originalBits < toBits) {
-    val = b.sext(int_ty(toBits), val);
-    toType = int_ty(toBits);
-  }
-
-  return toType;
-}
-
-// Trunc the value to specific length and then cast it to given type if
-// necessary. This function is typically used in conjunction with
-// castToAndSExtInt.
-static inline Value truncAndCastFromInt(RewriterBase &rewriter, Location loc,
-                                        Value val, Type valType,
-                                        unsigned fromBits) {
-  auto b = TritonLLVMOpBuilder(loc, rewriter);
-  unsigned originalBits = valType.getIntOrFloatBitWidth();
-  Value toVal = val;
-
-  if (originalBits < fromBits) {
-    toVal = b.trunc(int_ty(originalBits), toVal);
-  }
-
-  if (!valType.isIntOrIndex()) {
-    toVal = b.bitcast(toVal, valType);
-  }
-
-  return toVal;
-}
-
-// Permute lanes of the input val and apply reduction to permuted values.
-static Value permuteAndReduce(RewriterBase &rewriter, Location loc,
-                              StringRef intrinsic, Value val,
-                              Operation *reduxOp) {
-  Type valType = val.getType();
-  assert(valType.getIntOrFloatBitWidth() <= 32);
-
-  Type actualType = valType;
-  if (!valType.isInteger(32))
-    actualType = castToAndSExtInt(rewriter, loc, val, valType, 32);
-
-  auto b = TritonLLVMOpBuilder(loc, rewriter);
-  Value falseVal = b.false_val();
-  MLIRContext *ctx = rewriter.getContext();
-  Type retType = struct_ty({i32_ty, i32_ty});
-  Value perm =
-      LLVM::createLLVMIntrinsicCallOp(rewriter, loc, intrinsic, retType,
-                                      ValueRange{val, val, falseVal, falseVal})
-          ->getResult(0);
-  Value v0 = b.extract_val(i32_ty, perm, 0);
-  Value v1 = b.extract_val(i32_ty, perm, 1);
-
-  if (!valType.isInteger(32)) {
-    v0 = truncAndCastFromInt(rewriter, loc, v0, valType, 32);
-    v1 = truncAndCastFromInt(rewriter, loc, v1, valType, 32);
-  }
-  IRMapping mapping;
-  mapping.map(reduxOp->getOperand(0), v0);
-  mapping.map(reduxOp->getOperand(1), v1);
-  Value redx = rewriter.clone(*reduxOp, mapping)->getResult(0);
-  return redx;
-}
-
-// Apply warp reduction across lanes using llvm intrinsics in GFX950.
-// The input acc has the partial accumulated values from reduction within
-// threads. The output acc has the final accumulated values.
-//
-// Two special cases are supported:
-// When numLaneToReduce == 2 && interleave == 32:
-//   step 1: use permlane32_swap() to swap the row 2 and 3 of acc and
-//           the row 0 and 1 of the copy of acc
-//   step 2: apply reduction to the result values to get final result
-// When numLaneToReduce == 4 && interleave == 16:
-//   step 1: use permlane32_swap() to swap the row 2 and 3 of acc and
-//           the row 0 and 1 of the copy of acc
-//   step 2: apply reduction to the result values to get the partial result
-//   step 3: use permlane16_swap() to swap the odd and even rows of
-//           the partial results
-//   step 4: apply reduction to get the final results
-static bool warpReduceSwap16or32(RewriterBase &rewriter, Location loc,
-                                 SmallVector<Value> &acc, triton::ReduceOp op,
-                                 unsigned numLaneToReduce,
-                                 unsigned interleave) {
-  Operation *reduxOp = op.getSingleCombiner();
-  if (!reduxOp)
-    return false;
-
-  bool mfma32Case = numLaneToReduce == 2 && interleave == 32;
-  bool mfma16Case = numLaneToReduce == 4 && interleave == 16;
-  if (!(mfma32Case || mfma16Case))
-    return false;
-
-  Value val = acc[0];
-  unsigned bits = val.getType().getIntOrFloatBitWidth();
-  if (bits > 32)
-    return false;
-
-  StringRef intrinsic = "llvm.amdgcn.permlane32.swap";
-  for (auto i = 0; i < acc.size(); i++) {
-    Value redx = permuteAndReduce(rewriter, loc, intrinsic, acc[i], reduxOp);
-
-    if (mfma16Case) {
-      intrinsic = "llvm.amdgcn.permlane16.swap";
-      redx = permuteAndReduce(rewriter, loc, intrinsic, redx, reduxOp);
-    }
-
-    acc[i] = redx;
-  }
-  return true;
-}
-
-static bool warpReduceSwap16(RewriterBase &rewriter, Location loc,
-                             SmallVector<Value> &acc, triton::ReduceOp op,
-                             unsigned numLaneToReduce, unsigned interleave) {
-  Operation *reduxOp = op.getSingleCombiner();
-  if (!reduxOp)
-    return false;
-
-  bool mfma16Case = numLaneToReduce == 2 && interleave == 16;
-  if (!mfma16Case)
-    return false;
-
-  Value val = acc[0];
-  unsigned bits = val.getType().getIntOrFloatBitWidth();
-  if (bits > 32)
-    return false;
-
-  StringRef intrinsic = "llvm.amdgcn.permlane16.swap";
-  for (auto i = 0; i < acc.size(); i++) {
-    acc[i] = permuteAndReduce(rewriter, loc, intrinsic, acc[i], reduxOp);
-  }
-  return true;
-}
-
 bool TargetInfo::warpReduce(RewriterBase &rewriter, Location loc,
                             SmallVector<Value> &acc, triton::ReduceOp op,
                             unsigned numLaneToReduce,
                             unsigned interleave) const {
-  auto b = TritonLLVMOpBuilder(loc, rewriter);
-
-  if (getISAFamily() == ISAFamily::CDNA4 &&
-      warpReduceSwap16or32(rewriter, loc, acc, op, numLaneToReduce, interleave))
-    return true;
-  if ((getISAFamily() == ISAFamily::GFX1250) &&
-      warpReduceSwap16(rewriter, loc, acc, op, numLaneToReduce, interleave))
-    return true;
-  if (numLaneToReduce != getWarpSize())
-    return false;
-  if (isCDNA(getISAFamily()) && getISAFamily() == ISAFamily::CDNA1)
-    return false;
-  if (isRDNA(getISAFamily()) &&
-      llvm::is_contained({ISAFamily::RDNA1, ISAFamily::RDNA2}, getISAFamily()))
-    return false;
-
-  Operation *reduxOp = op.getSingleCombiner();
-  if (!reduxOp)
-    return false;
-
-  auto createDppReduxOpWithBoundCtrl = [&](Type valType, Value &src,
-                                           uint32_t dppCtrl, int rowMask,
-                                           int bankMask) -> Value {
-    // DPP has limited support for data types, so here we need to
-    // cast non-integer types or integer types shorter than 32 bits
-    // to int32, except for fp32.
-    Type actualType = valType;
-    if (!valType.isF32()) {
-      actualType = castToAndSExtInt(rewriter, loc, src, valType, 32);
-    }
-
-    Value dppResult =
-        ROCDL::DPPUpdateOp::create(rewriter, loc, actualType, src, src,
-                                   rewriter.getI32IntegerAttr(dppCtrl),
-                                   rewriter.getI32IntegerAttr(rowMask),
-                                   rewriter.getI32IntegerAttr(bankMask),
-                                   rewriter.getBoolAttr(true))
-            .getRes();
-
-    if (!valType.isF32()) {
-      src = truncAndCastFromInt(rewriter, loc, src, valType, 32);
-      dppResult = truncAndCastFromInt(rewriter, loc, dppResult, valType, 32);
-    }
-
-    IRMapping mapping;
-    mapping.map(reduxOp->getOperand(0), src);
-    mapping.map(reduxOp->getOperand(1), dppResult);
-    return rewriter.clone(*reduxOp, mapping)->getResult(0);
-  };
-
-  for (int i = 0; i < acc.size(); i++) {
-    Value buf;
-    auto valType = acc[i].getType();
-
-    // Here's the implementation of full-wavefront reduction using dpp.
-    // https://gpuopen.com/learn/amd-gcn-assembly-cross-lane-operations/
-    //
-    // Each step has a v_mov_dpp instruction following the redux op. In
-    // some cases, the lower-level compiler could merge them into single
-    // instruction. For example, v_mov_dpp + max => v_max_dpp.
-    //
-    // For gfx9, we have 64 threads per warp. These 64 threads are arranged
-    // into 4 rows, with each row being 16 threads. Each 16 threads are arranged
-    // further into 4 banks, with each bank being 4 threads. Overall it's in a
-    // (row, bank, thread) structure. When shuffling, we use row/bank mask to
-    // indicate which row/bank to participate. Then modifier like row_shr and
-    // row_bcast means exact data movement schemes. In the following
-    // instructions, taking row 0 as an example:
-    //
-    // Step 1: Right shift for 8 lanes.
-    //     lane 8-15 = redux(lane 0-7, lane 8-15)
-    //
-    // Step 2: Right shift for 4 lanes.
-    //     lane 12-15 = redux(lane 8-11, lane 12-15)
-    //
-    // Step 3: Right shift for 2 lanes.
-    //     lane 14-15 = redux(lane 12-13, lane 14-15)
-    //
-    // Step 4: Right shift for 1 lane.
-    //     lane 15 = redux(lane 14, lane 15)
-    //
-    // Step 5: Broadcast lane 15 of each row to all the lanes of its next row.
-    //     lane 16-31 = redux(lane 15, lane 16-31)
-    //
-    // Step 6: Broadcast lane 31 to lane 32-63.
-    //     lane 32-63 = redux(lane 31, lane 32-63)
-    //
-    // Now the reduction result is stored in lane 63.
-    //
-    // Step 7: Read the reduction result from lane 63 and broadcast with
-    // readlane.
-
-    const int allRows = 0xf;
-    const int allBanks = 0xf;
-
-    const uint32_t dppCtrlRowShr = static_cast<uint32_t>(DppCtrl::ROW_SHR0);
-
-    // row_shr:8
-    buf = createDppReduxOpWithBoundCtrl(valType, acc[i], 8 + dppCtrlRowShr,
-                                        allRows, allBanks);
-
-    // row_shr:4
-    buf = createDppReduxOpWithBoundCtrl(valType, buf, 4 + dppCtrlRowShr,
-                                        allRows, allBanks);
-
-    // row_shr:2
-    buf = createDppReduxOpWithBoundCtrl(valType, buf, 2 + dppCtrlRowShr,
-                                        allRows, allBanks);
-
-    // row_shr:1
-    buf = createDppReduxOpWithBoundCtrl(valType, buf, 1 + dppCtrlRowShr,
-                                        allRows, allBanks);
-
-    if (isCDNA(getISAFamily())) {
-      // row_bcast:15 row_mask:0xa
-      buf = createDppReduxOpWithBoundCtrl(
-          valType, buf, static_cast<uint32_t>(DppCtrl::BCAST15), 0xa, allBanks);
-
-      // row_bcast:31
-      buf = createDppReduxOpWithBoundCtrl(
-          valType, buf, static_cast<uint32_t>(DppCtrl::BCAST31), allRows,
-          allBanks);
-    } else {
-      // RDNA doesn't have broadcast dpp mode
-      Type actualType = castToAndSExtInt(rewriter, loc, buf, valType, 32);
-
-      // Lanes 0-15 read from lane 31 and lanes 16-31 read from lane 15.
-      Value permlaneResult = ROCDL::PermlaneX16Op::create(
-                                 rewriter, loc, actualType, buf, buf,
-                                 b.i32_val(-1), b.i32_val(-1), true, false)
-                                 .getRes();
-      buf = truncAndCastFromInt(rewriter, loc, buf, valType, 32);
-      permlaneResult =
-          truncAndCastFromInt(rewriter, loc, permlaneResult, valType, 32);
-      IRMapping mapping;
-      mapping.map(reduxOp->getOperand(0), buf);
-      mapping.map(reduxOp->getOperand(1), permlaneResult);
-      buf = rewriter.clone(*reduxOp, mapping)->getResult(0);
-    }
-
-    // Similarly, we need to cast data types for readlane instruction.
-    Type actualType = castToAndSExtInt(rewriter, loc, buf, valType, 16);
-
-    // Get reduction result from the last lane of the warp
-    Value lastLaneId = b.i32_val(gpu::lookupThreadsPerWarp(rewriter) - 1);
-    Value result =
-        ROCDL::ReadlaneOp::create(rewriter, loc, actualType, buf, lastLaneId);
-
-    result = truncAndCastFromInt(rewriter, loc, result, valType, 16);
-
-    acc[i] = result;
-  }
-
-  return true;
-}
-
-void TargetInfo::printfImpl(Value formatStrStart, int formatStrByteCount,
-                            ValueRange args, ArrayRef<bool> isSigned,
-                            RewriterBase &rewriter, bool useStdErr) const {
-  // Printf not supported in minimal nano backend - requires ockl.bc
-  // Silently ignore printf calls
+  // Warp reduction not supported in minimal backend
+  return false;
 }
 
 std::string TargetInfo::getMulhiFuncName(Type resultElementTy) const {
-  // Use LLVM intrinsics instead of ockl functions
-  std::string funcName =
-      resultElementTy.isInteger(32) ? "llvm.amdgcn.mul.hi.u32" : "llvm.amdgcn.mul.hi.u64";
-  return funcName;
+  return resultElementTy.isInteger(32) ? "llvm.amdgcn.mul.hi.u32"
+                                       : "llvm.amdgcn.mul.hi.u64";
 }
 
 void TargetInfo::printf(RewriterBase &rewriter, Value formatStrStart,
                         int formatStrByteCount, ValueRange args,
                         ArrayRef<bool> isSigned) const {
-  return printfImpl(formatStrStart, formatStrByteCount, args, isSigned,
-                    rewriter,
-                    /*useStdError=*/false);
+  // Printf not supported in minimal backend
 }
 
 void TargetInfo::printf(RewriterBase &rewriter, StringRef msg, ValueRange args,
                         ArrayRef<bool> isSigned) const {
-  assert(!msg.empty() && "printf with empty string not supported");
-  llvm::SmallString<64> msgNewline(msg);
-  msgNewline.push_back('\n');
-  msgNewline.push_back('\0');
-  Value msgValue =
-      LLVM::addStringToModule(UnknownLoc::get(rewriter.getContext()), rewriter,
-                              "printfFormat_", msgNewline);
-  printf(rewriter, msgValue, msgNewline.size_in_bytes(), args, isSigned);
+  // Printf not supported in minimal backend
 }
 
 void TargetInfo::assertFail(RewriterBase &rewriter, Location loc,
                             StringRef message, StringRef file, StringRef func,
                             int line) const {
-  auto b = TritonLLVMOpBuilder(loc, rewriter);
-  // Compose and print an assert message.
-  llvm::SmallString<256> msgBuffer;
-  llvm::Twine("device assertion failed: '" + message + "', in " + func +
-              " at " + file + ":" + llvm::Twine(line) + "\n\0")
-      .toStringRef(msgBuffer);
-  Value msgValue =
-      LLVM::addStringToModule(loc, rewriter, "printfFormat_", msgBuffer);
-  printfImpl(msgValue, msgBuffer.size_in_bytes(), /*args=*/ValueRange(),
-             /*isSigned=*/{}, rewriter, /*useStdError=*/true);
-
-  // Set block barrier before aborting kernel, give a chance for all
-  // the threads in a block to check/print the assert failure.
-  b.barrier(triton::gpu::AddrSpace::All);
-  // Perform the trap to abort the kernel.
+  // Just trap without printing
   LLVM::Trap::create(rewriter, loc);
 }
 
 int TargetInfo::getSharedAddressSpace() const { return 3; }
 
 int TargetInfo::getAddressSpace(Attribute addressSpace) const {
-  int spaceId = 0;
   if (isa<triton::gpu::SharedMemorySpaceAttr>(addressSpace)) {
-    spaceId = 3;
-  } else {
-    llvm::report_fatal_error("Only support SharedMemorySpace for now");
+    return 3;
   }
-  return spaceId;
+  llvm::report_fatal_error("Only support SharedMemorySpace for now");
 }
 
-bool TargetInfo::supportVectorizedAtomics() const {
-  // Note: not currently tested or used, but AMD generally supports vectorized
-  // atomics.
-  return true;
-}
+bool TargetInfo::supportVectorizedAtomics() const { return true; }
 
 bool TargetInfo::supportsDirectToLDSScattering() const {
-  switch (getISAFamily()) {
-  case ISAFamily::GFX1250:
-    return true;
-  default:
-    return false;
-  }
+  return getISAFamily() == ISAFamily::GFX1250;
 }
 
 bool TargetInfo::requiresAliasInfoForAsyncOps() const {
-  switch (getISAFamily()) {
-  case ISAFamily::CDNA3:
-  case ISAFamily::CDNA4:
-    return true;
-  default:
-    return false;
-  }
+  return getISAFamily() == ISAFamily::CDNA3 ||
+         getISAFamily() == ISAFamily::CDNA4;
 }
 
 bool TargetInfo::supportsDirectToLdsLoadBitWidth(int bitWidth) const {
   switch (getISAFamily()) {
   case ISAFamily::CDNA3:
-    // Disable 8 and 16 bits because they get extended to 32 bit.
-    return llvm::is_contained({32, /*16, 8*/}, bitWidth);
+    return bitWidth == 32;
   case ISAFamily::CDNA4:
-    // Disable 8, 16, 96 bits because they get extended to 32/128 bit.
-    return llvm::is_contained({128, /*96, */ 32, /*16, 8*/}, bitWidth);
+    return bitWidth == 128 || bitWidth == 32;
   case ISAFamily::GFX1250:
-    // Disable 8, 16 bits because they get extended to 32 bit and therefore
-    // overwrite. 96 is not a pow2 and generally not useful in Triton
-    return llvm::is_contained({128, 64, /*96, */ 32, /*16, 8*/}, bitWidth);
+    return bitWidth == 128 || bitWidth == 64 || bitWidth == 32;
   default:
-    break;
+    return false;
   }
-
-  return false;
 }
 
 bool TargetInfo::supportsMultiCTALaunch() const {
   return getISAFamily() == ISAFamily::GFX1250;
 }
 
-bool TargetInfo::supportsTDM() const {
-  // TDM not supported in minimal nano backend
-  return false;
-}
+bool TargetInfo::supportsTDM() const { return false; }
 
-bool TargetInfo::supportsClusterLoadBitWidth(int biwWidth) const {
+bool TargetInfo::supportsClusterLoadBitWidth(int bitWidth) const {
   if (getISAFamily() == ISAFamily::GFX1250) {
-    return llvm::is_contained({32, 64, 128}, biwWidth);
+    return bitWidth == 32 || bitWidth == 64 || bitWidth == 128;
   }
   return false;
 }
 
 bool TargetInfo::supportsDirectFromLdsStoreBitWidth(int bitWidth) const {
   if (getISAFamily() == ISAFamily::GFX1250) {
-    return llvm::is_contained({128, 64, 32, 8}, bitWidth);
+    return bitWidth == 128 || bitWidth == 64 || bitWidth == 32 || bitWidth == 8;
   }
   return false;
 }
 
 void TargetInfo::localLoadOpAnnotation(triton::gpu::LocalLoadOp localLoadOp,
                                        Operation *llLoadOp) const {
-  // addLocalLoadNoAliasScope removed - not needed for minimal nano backend
+  // Not needed for minimal backend
 }
 
 } // namespace mlir::triton::NANO

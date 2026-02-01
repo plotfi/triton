@@ -41,16 +41,6 @@ public:
                     std::optional<Value> ctaId, Type elemTy, Value pred,
                     Operation *localLoadOp = nullptr) const override;
 
-  // Describes the parameters of ds_read_tr for a particular data type
-  struct LDSTransLoadParams {
-    // Number of lanes that cooperate in the instruction
-    unsigned numLanesInShuffleGroup;
-    // Number of bits that each lane reads per issued instruction
-    unsigned instBitWidth;
-    // Number of elements that the instruction needs to be contiguous in LDS
-    unsigned tileSize;
-  };
-
   Value shuffleXor(RewriterBase &rewriter, Location loc, Value val,
                    int i) const override;
   Value shuffleUp(RewriterBase &rewriter, Location loc, Value val,
@@ -109,10 +99,6 @@ public:
                              Operation *llLoadOp) const override;
 
 private:
-  void printfImpl(Value formatStrStart, int formatStrByteCount, ValueRange args,
-                  ArrayRef<bool> isSigned, RewriterBase &rewriter,
-                  bool useStdErr) const;
-
   std::string arch;
 };
 } // namespace mlir::triton::NANO

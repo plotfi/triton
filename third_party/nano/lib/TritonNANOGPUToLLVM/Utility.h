@@ -2,7 +2,6 @@
 #define TRITON_THIRD_PARTY_NANO_LIB_TRITONNANOGPUTOLLVM_UTILITY_H_
 
 #include "TargetInfo.h"
-#include "TritonNANOGPUToLLVM/TargetUtils.h"
 
 #include "mlir/Conversion/LLVMCommon/Pattern.h"
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
@@ -15,27 +14,8 @@ namespace mlir::LLVM::NANO {
 
 enum class MemoryOp { Load, Store };
 
-Value shuffleXor(Location loc, RewriterBase &rewriter, Value val, int i,
-                 mlir::triton::NANO::ISAFamily isaFamily =
-                     mlir::triton::NANO::ISAFamily::Unknown);
-Value shuffleUp(Location loc, RewriterBase &rewriter, Value val, int i,
-                mlir::triton::NANO::ISAFamily isaFamily =
-                    mlir::triton::NANO::ISAFamily::Unknown);
-Value shuffleIdx(Location loc, RewriterBase &rewriter, Value val, int i,
-                 mlir::triton::NANO::ISAFamily isaFamily =
-                     mlir::triton::NANO::ISAFamily::Unknown);
-Value shuffleIdx(Location loc, RewriterBase &rewriter, Value val, Value i,
-                 mlir::triton::NANO::ISAFamily isaFamily =
-                     mlir::triton::NANO::ISAFamily::Unknown);
-
-Value permute(Location loc, RewriterBase &rewriter, Value a, Value b,
-              Value selector);
-
 Value llGetPid(Location loc, RewriterBase &rewriter, ModuleOp moduleOp,
                ProgramIDDim axis);
-
-std::pair<bool, bool>
-getCacheModifierFlagsForLoadStore(const triton::CacheModifier &cm, MemoryOp op);
 
 // Loads from shared or global memory with predication.
 // `otherElems` is used to mask out the elements that are not loaded
@@ -50,10 +30,6 @@ Value llLoad(RewriterBase &rewriter, Location loc, Value ptr, Type elemTy,
 void llStore(RewriterBase &rewriter, Location loc, Value ptr, Value val,
              Value pred, triton::CacheModifier cm = triton::CacheModifier::NONE,
              bool forceNoAliasAsyncLoads = false);
-
-// Get cache modifier information for creating load or store instruction
-// Get flags <volatile, nontemporal> for a predicated Load or Store
-std::pair<bool, bool> getCacheModifierFlagsForLoadStore(LLVM::CallOp);
 
 // Return a tensor of pointers with the same type of `basePtr` and the same
 // shape of `offset`
