@@ -1,5 +1,4 @@
-# Triton Nano Backend - Minimal backend for simple kernels like vector add
-# Based on AMD backend, simplified for educational and prototyping purposes
+# Triton Nano Backend - Minimal driver for simple kernels like vector add
 
 import functools
 import os
@@ -9,59 +8,15 @@ from pathlib import Path
 from triton import knobs
 from triton.backends.compiler import GPUTarget
 from triton.backends.driver import GPUDriver
-from triton.runtime import _allocation
 from triton.runtime.build import compile_module_from_src
 
 dirname = os.path.dirname(os.path.realpath(__file__))
 include_dirs = [os.path.join(dirname, "include")]
-PyKernelArg = None
-ARG_CONSTEXPR = None
-ARG_KERNEL = None
-ARG_TUPLE = None
-
-
-def _find_already_mmapped_dylib_on_linux(lib_name):
-    import platform
-    if platform.system() != 'Linux':
-        return None
-
-    import ctypes
-    from ctypes import c_char, c_int, c_size_t, c_void_p, c_char_p, POINTER
-
-    class DlPhdrInfo(ctypes.Structure):
-        _fields_ = [
-            ('dlpi_addr', c_void_p),
-            ('dlpi_name', c_char_p),
-        ]
-
-    callback_t = ctypes.CFUNCTYPE(c_int, POINTER(DlPhdrInfo), POINTER(c_size_t), POINTER(c_char))
-
-    try:
-        dl_iterate_phdr = ctypes.CDLL('libc.so.6').dl_iterate_phdr
-    except Exception:
-        return None
-    dl_iterate_phdr.argtypes = [callback_t, c_char_p]
-    dl_iterate_phdr.restype = c_int
-
-    max_path_length = 4096
-    path = ctypes.create_string_buffer(max_path_length + 1)
-
-    def callback(info, size, data):
-        dlpi_name = info.contents.dlpi_name
-        p = Path(os.fsdecode(dlpi_name))
-        if lib_name in p.name:
-            ctypes.memmove(data, dlpi_name, min(max_path_length, len(dlpi_name)))
-            return 1
-        return 0
-
-    if dl_iterate_phdr(callback_t(callback), path):
-        return os.fsdecode(ctypes.string_at(path))
-    return None
 
 
 @functools.lru_cache()
 def _get_path_to_hip_runtime_dylib():
-    """Find the HIP runtime library - reused from AMD backend."""
+    """Find the HIP runtime library."""
     lib_name = "libamdhip64.so"
 
     if env_libhip_path := knobs.amd.libhip_path:
@@ -69,79 +24,48 @@ def _get_path_to_hip_runtime_dylib():
             return env_libhip_path
         raise RuntimeError(f"TRITON_LIBHIP_PATH '{env_libhip_path}' does not point to a valid {lib_name}")
 
-    mmapped_path = _find_already_mmapped_dylib_on_linux(lib_name)
-    if mmapped_path:
-        if os.path.exists(mmapped_path):
-            return mmapped_path
-        raise RuntimeError(f"memory mapped '{mmapped_path}' in process does not point to a valid {lib_name}")
-
-    paths = []
-
-    local_lib = os.path.join(os.path.dirname(__file__), "lib", lib_name)
-    if os.path.exists(local_lib):
-        return local_lib
-    paths.append(local_lib)
-
-    import site
-    site_packages = site.getsitepackages()
-    user_site = site.getusersitepackages()
-    if site.ENABLE_USER_SITE:
-        site_packages = [user_site] + site_packages
-    for path in site_packages:
-        path = os.path.join(path, "torch", "lib", lib_name)
-        if os.path.exists(path):
-            return path
-        paths.append(path)
-
+    # Check LD_LIBRARY_PATH
     env_ld_library_path = os.getenv("LD_LIBRARY_PATH")
     if env_ld_library_path:
         for d in env_ld_library_path.split(":"):
             f = os.path.join(d, lib_name)
             if os.path.exists(f):
                 return f
-            paths.append(f)
 
+    # Check HIP_PATH
     env_hip_path = os.getenv("HIP_PATH")
     if env_hip_path:
         hip_lib_path = os.path.join(env_hip_path, "lib", lib_name)
         if os.path.exists(hip_lib_path):
             return hip_lib_path
-        paths.append(hip_lib_path)
 
-    try:
-        hip_root = subprocess.check_output(["hipconfig", "--path"]).decode().strip()
-        if hip_root:
-            hip_lib_path = os.path.join(hip_root, "lib", lib_name)
-            if os.path.exists(hip_lib_path):
-                return hip_lib_path
-            paths.append(hip_lib_path)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pass
-
+    # Check ROCM_PATH
     env_rocm_path = os.getenv("ROCM_PATH")
     if env_rocm_path:
         rocm_lib_path = os.path.join(env_rocm_path, "lib", lib_name)
         if os.path.exists(rocm_lib_path):
             return rocm_lib_path
-        paths.append(rocm_lib_path)
 
-    libs = subprocess.check_output(["/sbin/ldconfig", "-p"]).decode(errors="ignore")
-    locs = [line.split()[-1] for line in libs.splitlines() if line.strip().endswith(lib_name)]
-    for loc in locs:
-        if os.path.exists(loc):
-            return loc
-        paths.append(loc)
-
+    # Check common install path
     common_install_path = os.path.join('/opt/rocm/lib/', lib_name)
     if os.path.exists(common_install_path):
         return common_install_path
-    paths.append(common_install_path)
 
-    raise RuntimeError(f"cannot locate {lib_name} after attempted paths {paths}")
+    # Try ldconfig
+    try:
+        libs = subprocess.check_output(["/sbin/ldconfig", "-p"]).decode(errors="ignore")
+        locs = [line.split()[-1] for line in libs.splitlines() if line.strip().endswith(lib_name)]
+        for loc in locs:
+            if os.path.exists(loc):
+                return loc
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    raise RuntimeError(f"cannot locate {lib_name}")
 
 
 class NanoUtils(object):
-    """Utility class for Nano backend - simplified from HIPUtils."""
+    """Utility class for Nano backend."""
 
     def __new__(cls):
         if not hasattr(cls, "instance"):
@@ -157,116 +81,59 @@ class NanoUtils(object):
         self.get_device_properties = mod.get_device_properties
         self.launch = mod.launch
         self.build_signature_metadata = mod.build_signature_metadata
-        global PyKernelArg
-        global ARG_CONSTEXPR
-        global ARG_KERNEL
-        global ARG_TUPLE
-        PyKernelArg = mod.PyKernelArg
-        ARG_CONSTEXPR = mod.ARG_CONSTEXPR
-        ARG_KERNEL = mod.ARG_KERNEL
-        ARG_TUPLE = mod.ARG_TUPLE
 
 
-# -------------------- Launcher ----------------------------
 def ty_to_cpp(ty):
+    """Map Triton types to C++ types."""
     if ty.startswith('*'):
         return "hipDeviceptr_t"
     return {
-        "i1": "int8_t",
-        "i8": "int8_t",
-        "i16": "int16_t",
+        "i1": "int32_t",
         "i32": "int32_t",
-        "i64": "int64_t",
-        "u1": "uint8_t",
-        "u8": "uint8_t",
-        "u16": "uint16_t",
+        "u1": "uint32_t",
         "u32": "uint32_t",
-        "u64": "uint64_t",
-        "fp16": "double",
-        "bf16": "double",
-        "fp32": "double",
-        "f32": "double",
-        "fp64": "double",
+        "fp32": "float",
+        "f32": "float",
     }[ty]
 
 
-def expand_signature(signature):
-    """Expand signature (no-op for basic types)."""
-    return list(signature)
-
-
 def make_kernel_signature(signature):
-    """Creates a kernel signature in C for efficient argument extraction."""
-
-    def _flatten_signature(sig, output):
-        if isinstance(sig, tuple):
-            for x in sig:
-                _flatten_signature(x, output)
-        else:
-            output.append(sig)
-
+    """Create signature metadata for kernel launch."""
     flat_signature = []
     for sig in signature:
-        _flatten_signature(sig, flat_signature)
-    kernel_signature = [x for x in flat_signature if x != "constexpr"]
-
-    return triton.runtime.driver.active.utils.build_signature_metadata(kernel_signature)
-
-
-def annotate_arguments(signature):
-    """Annotate signature with C objects for efficient tuple flattening."""
-    annotated_arguments = []
-    for sig in signature:
         if isinstance(sig, tuple):
-            annotated_arguments.append((PyKernelArg(nested_tuple=annotate_arguments(sig), type=ARG_TUPLE)))
+            flat_signature.extend(sig)
         elif sig != "constexpr":
-            annotated_arguments.append(PyKernelArg(nested_tuple=None, type=ARG_KERNEL))
-        else:
-            annotated_arguments.append(PyKernelArg(nested_tuple=None, type=ARG_CONSTEXPR))
-    return annotated_arguments
+            flat_signature.append(sig)
+    kernel_signature = [x for x in flat_signature if x != "constexpr"]
+    return triton.runtime.driver.active.utils.build_signature_metadata(kernel_signature)
 
 
 class NanoLauncher(object):
     """Simplified kernel launcher for Nano backend."""
 
     def __init__(self, src, metadata):
-        constants = src.constants if hasattr(src, "constants") else dict()
-        arg_idx = lambda x: (src.fn.arg_names.index(x), ) if isinstance(x, str) else x
-        constants = {arg_idx(idx): value for idx, value in constants.items()}
         signature = {idx: value for idx, value in src.signature.items()}
         self.launch = triton.runtime.driver.active.utils.launch
-        expanded_signature = expand_signature(signature.values())
-        self.arg_annotations = annotate_arguments(expanded_signature)
-        self.kernel_signature = make_kernel_signature(expanded_signature)
-        self.launch_cooperative_grid = metadata.launch_cooperative_grid
+        self.kernel_signature = make_kernel_signature(signature.values())
         self.warp_size = metadata.warp_size
-        if self.launch_cooperative_grid:
-            driver = triton.runtime.driver.active
-            assert isinstance(driver, NanoDriver)
-            device = driver.get_current_device()
-            device_properties = driver.utils.get_device_properties(device)
-            assert device_properties['cooperativeLaunch'], \
-                "Cooperative launch requested but not supported by device"
-        self.profile_scratch_size = metadata.profile_scratch_size
-        self.profile_scratch_align = metadata.profile_scratch_align
 
     def __call__(self, gridX, gridY, gridZ, stream, function, kernel_metadata, launch_metadata, launch_enter_hook,
                  launch_exit_hook, *args):
+        # Extract num_warps and shared_memory from kernel_metadata tuple
+        num_warps, num_ctas, shared_memory = kernel_metadata
 
-        def allocate_scratch(size, align, allocator):
-            if size > 0:
-                grid_size = gridX * gridY * gridZ
-                alloc_size = grid_size * size
-                alloc_fn = allocator.get()
-                return alloc_fn(alloc_size, align, stream)
-            return None
+        # Flatten args if needed
+        flat_args = []
+        for arg in args:
+            if isinstance(arg, tuple):
+                flat_args.extend(arg)
+            else:
+                flat_args.append(arg)
 
-        profile_scratch = allocate_scratch(self.profile_scratch_size, self.profile_scratch_align,
-                                           _allocation._profile_allocator)
-
-        self.launch(self.launch_cooperative_grid, gridX, gridY, gridZ, stream, function, profile_scratch,
-                    kernel_metadata, launch_metadata, launch_enter_hook, launch_exit_hook, self.warp_size,
-                    self.arg_annotations, self.kernel_signature, args)
+        # Call simplified launch
+        self.launch(gridX, gridY, gridZ, stream, function, num_warps, shared_memory,
+                    self.warp_size, self.kernel_signature, flat_args)
 
 
 class NanoDriver(GPUDriver):
@@ -297,7 +164,6 @@ class NanoDriver(GPUDriver):
         device_properties = self.utils.get_device_properties(device)
         arch = knobs.runtime.override_arch or device_properties['arch']
         warp_size = device_properties['warpSize']
-        # Return nano as the backend name
         return GPUTarget("nano", arch.split(':')[0], warp_size)
 
     def get_active_torch_device(self):

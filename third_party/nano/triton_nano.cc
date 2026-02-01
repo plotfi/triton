@@ -259,8 +259,4 @@ void init_triton_nano(py::module &&m) {
                                      inPath + " into object file " + outPath +
                                      " because " + errString.value());
         });
-
-  // m.def("add_scalarize_packed_fops_llvm_pass", [](llvm::Function *fn) {
-  //   mlir::triton::NANO::runScalarizePackedFOpsPass(*fn);
-  // });
 }

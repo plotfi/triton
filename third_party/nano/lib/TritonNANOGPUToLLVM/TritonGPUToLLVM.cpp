@@ -115,11 +115,6 @@ struct ConvertTritonNANOGPUToLLVM
         return signalPassFailure();
     }
 
-    // initSharedMemory is run before the conversion of call and ret ops,
-    // because the call op has to know the shared memory base address of each
-    // function
-    initSharedMemory(typeConverter);
-
     // Convert call and ret ops
     {
       TritonLLVMFunctionConversionTarget funcTarget(*context);
@@ -130,19 +125,13 @@ struct ConvertTritonNANOGPUToLLVM
     }
 
     NANO::ModuleAxisInfoAnalysis axisInfoAnalysis(mod);
-
-    // Emit logics to get threadId/blockIds/linearized clusterCTAId etc. and
-    // cache the values. The reason to do it here is that cluster_ctaid is
-    // currently implemented via inline asm, and thus cannot be CSEed.
-    // clusterCTAId will be emitted only when numCTAs is larger than 1, and
-    // other values will be DCEed if not used hereafter.
     OpBuilder::InsertPoint indexInsertPoint;
 
     RewritePatternSet patterns(context);
     int commonBenefit = patternBenefitPrioritizeOverLLVMConversions;
-    // Make benefit for AMD specific patterns higher so they apply before common
+    // Make benefit for GPU specific patterns higher so they apply before common
     // patterns
-    int AMDBenefit = commonBenefit + 1;
+    int NANOBenefit = commonBenefit + 1;
     auto populatePatterns1 = [&](auto populateFunc, int benefit) {
       populateFunc(typeConverter, patterns, axisInfoAnalysis, allocation,
                    benefit);
@@ -162,14 +151,14 @@ struct ConvertTritonNANOGPUToLLVM
     };
 
     NANO::populateConvertLayoutOpToLLVMPatterns(typeConverter, targetInfo,
-                                               patterns, AMDBenefit);
+                                               patterns, NANOBenefit);
     mlir::triton::populateConvertLayoutOpToLLVMPatterns(
         typeConverter, targetInfo, patterns, commonBenefit);
     NANO::populateElementwiseOpToLLVMPatterns(typeConverter, patterns, ftz,
                                              axisInfoAnalysis, allocation,
-                                             targetInfo, AMDBenefit);
+                                             targetInfo, NANOBenefit);
     NANO::populateLoadStoreOpToLLVMPatterns(typeConverter, targetInfo, patterns,
-                                           axisInfoAnalysis, AMDBenefit);
+                                           axisInfoAnalysis, NANOBenefit);
 
     populatePatterns7(mlir::triton::populateReduceOpToLLVMPatterns,
                       commonBenefit);
@@ -194,26 +183,22 @@ struct ConvertTritonNANOGPUToLLVM
                                               targetInfo, commonBenefit);
 
     // TritonNANOGPU dialect patterns removed - not needed for minimal backend
-
-    // TODO(thomas): this should probably be done in a separate step to not
-    // interfere with our own lowering of arith ops. Add arith/math's patterns
-    // to help convert scalar expression to LLVM.
     mlir::arith::populateArithToLLVMConversionPatterns(typeConverter, patterns);
     mlir::populateMathToLLVMConversionPatterns(typeConverter, patterns);
 
     mlir::triton::NANO::populateWarpIdOpToLLVMPattern(typeConverter, targetInfo,
                                                      patterns, commonBenefit);
 
-    FailureOr<mlir::amdgpu::Chipset> maybeChipset =
-        mlir::amdgpu::Chipset::parse(this->arch);
+    { // Native (AMD) lowering patterns:
+    auto maybeChipset = mlir::amdgpu::Chipset::parse(this->arch);
     if (failed(maybeChipset)) {
       emitError(UnknownLoc::get(&getContext()),
-                "Invalid AMDGPU chipset name: " + this->arch);
+                "Invalid chipset name: " + this->arch);
       return signalPassFailure();
     }
-    // Native lowering patterns
     mlir::populateGpuToROCDLConversionPatterns(
         typeConverter, patterns, mlir::gpu::amd::HIP, *maybeChipset);
+    }
 
     mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter,
                                                           patterns);
@@ -230,26 +215,6 @@ struct ConvertTritonNANOGPUToLLVM
 
     // Ensure warp group code is isolated from above.
     makeAllWarpGroupsIsolatedFromAbove(mod);
-  }
-
-private:
-  void initSharedMemory(LLVMTypeConverter &typeConverter) {
-    ModuleOp mod = getOperation();
-    OpBuilder b(mod.getBodyRegion());
-    auto ctx = mod.getContext();
-    auto loc = mod.getLoc();
-    auto elemTy = typeConverter.convertType(b.getIntegerType(8));
-    // Set array size 0 and external linkage indicates that we use dynamic
-    // shared allocation to allow a larger shared memory size for each kernel.
-    //
-    // Ask for 16B alignment on global_smem because that's the largest we should
-    // ever need (4xi32).
-    auto arrayTy = LLVM::LLVMArrayType::get(elemTy, 0);
-    auto global = LLVM::GlobalOp::create(
-        b, loc, arrayTy, /*isConstant=*/false, LLVM::Linkage::External,
-        "global_smem", /*value=*/Attribute(), /*alignment=*/16,
-        // Add ROCm support.
-        static_cast<unsigned>(NVVM::NVVMMemorySpace::Shared));
   }
 };
 

@@ -257,67 +257,6 @@ typedef enum hipDriverProcAddressQueryResult {
   HIP_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT = 2
 } hipDriverProcAddressQueryResult;
 
-/* Launch attribute ID */
-typedef enum hipLaunchAttributeID {
-  hipLaunchAttributeAccessPolicyWindow = 1,
-  hipLaunchAttributeCooperative = 2,
-  hipLaunchAttributeSynchronizationPolicy = 3,
-  hipLaunchAttributeClusterDimension = 4,
-  hipLaunchAttributeClusterSchedulingPolicyPreference = 5,
-  hipLaunchAttributeProgrammaticStreamSerialization = 6,
-  hipLaunchAttributeProgrammaticEvent = 7,
-  hipLaunchAttributePriority = 8,
-  hipLaunchAttributeMemSyncDomainMap = 9,
-  hipLaunchAttributeMemSyncDomain = 10,
-  hipLaunchAttributeMax
-} hipLaunchAttributeID;
-
-/* Access policy window (simplified - used in launch attribute value) */
-typedef struct hipAccessPolicyWindow {
-  void* base_ptr;
-  size_t num_bytes;
-  float hitRatio;
-  int hitProp;
-  int missProp;
-} hipAccessPolicyWindow;
-
-/* Launch attribute value */
-typedef union hipLaunchAttributeValue {
-  char pad[64];
-  hipAccessPolicyWindow accessPolicyWindow;
-  int cooperative;
-  int priority;
-  struct {
-    unsigned int x;
-    unsigned int y;
-    unsigned int z;
-  } clusterDim;
-} hipLaunchAttributeValue;
-
-/* Launch attribute */
-typedef struct hipLaunchAttribute_st {
-  hipLaunchAttributeID id;
-  char pad[8 - sizeof(hipLaunchAttributeID)];
-  union {
-    hipLaunchAttributeValue val;
-    hipLaunchAttributeValue value;
-  };
-} hipLaunchAttribute;
-
-/* Launch config */
-typedef struct HIP_LAUNCH_CONFIG_st {
-  unsigned int gridDimX;
-  unsigned int gridDimY;
-  unsigned int gridDimZ;
-  unsigned int blockDimX;
-  unsigned int blockDimY;
-  unsigned int blockDimZ;
-  unsigned int sharedMemBytes;
-  hipStream_t hStream;
-  hipLaunchAttribute* attrs;
-  unsigned int numAttrs;
-} HIP_LAUNCH_CONFIG;
-
 #ifdef __cplusplus
 }
 #endif
