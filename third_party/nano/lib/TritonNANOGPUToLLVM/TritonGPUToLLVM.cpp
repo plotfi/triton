@@ -3,6 +3,7 @@
 #include "PatternTritonGPUOpToLLVM.h"
 #include "TargetInfo.h"
 #include "TritonNANOGPUToLLVM/TypeConverter.h"
+#include "TritonNANOGPUToLLVM/TargetUtils.h"
 #include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
 #include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
 #include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
@@ -10,7 +11,6 @@
 #include "mlir/Conversion/MathToLLVM/MathToLLVM.h"
 #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
 #include "mlir/Conversion/UBToLLVM/UBToLLVM.h"
-#include "mlir/Dialect/AMDGPU/Utils/Chipset.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
@@ -189,16 +189,9 @@ struct ConvertTritonNANOGPUToLLVM
     mlir::triton::NANO::populateWarpIdOpToLLVMPattern(typeConverter, targetInfo,
                                                      patterns, commonBenefit);
 
-    { // Native (AMD) lowering patterns:
-    auto maybeChipset = mlir::amdgpu::Chipset::parse(this->arch);
-    if (failed(maybeChipset)) {
-      emitError(UnknownLoc::get(&getContext()),
-                "Invalid chipset name: " + this->arch);
-      return signalPassFailure();
-    }
-    mlir::populateGpuToROCDLConversionPatterns(
-        typeConverter, patterns, mlir::gpu::amd::HIP, *maybeChipset);
-    }
+
+    // Nasty macro to move ISA specifics out:
+    populateISASpecificConversionPatterns();
 
     mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter,
                                                           patterns);

@@ -6,27 +6,12 @@
 
 namespace mlir::triton::NANO {
 
-// AMD SPECIFIC TargetInfo code:
-int TargetInfo::getWarpSize() const {
-  switch (getISAFamily()) {
-  case ISAFamily::CDNA1:
-  case ISAFamily::CDNA2:
-  case ISAFamily::CDNA3:
-  case ISAFamily::CDNA4:
-    return 64;
-  case ISAFamily::GFX1250:
-    return 32;
-  default:
-    return 32;
-  }
-}
+int TargetInfo::getWarpSize() const { return 64; }
 void TargetInfo::warpSync(Location loc, RewriterBase &rewriter) const {
-  LLVM::createLLVMIntrinsicCallOp(rewriter, loc, "llvm.amdgcn.wave.barrier", {},
-                                  {});
+  llvm_unreachable("warpSync not supported in nano backend");
 }
 std::string TargetInfo::getMulhiFuncName(Type resultElementTy) const {
-  return resultElementTy.isInteger(32) ? "llvm.amdgcn.mul.hi.u32"
-                                       : "llvm.amdgcn.mul.hi.u64";
+  llvm_unreachable("MulhiFuncName not supported in nano backend");
 }
 
 bool TargetInfo::supportMaximumMinimum() const { return false; }
@@ -37,12 +22,12 @@ Value TargetInfo::getClusterCTAId(RewriterBase &rewriter, Location loc) const {
 
 Value TargetInfo::ballot(RewriterBase &rewriter, Location loc, Type type,
                          Value cmp) const {
-  llvm_unreachable("ballot not supported");
+  llvm_unreachable("ballot not supported in nano backend");
 }
 
 void TargetInfo::barrier(Location loc, RewriterBase &rewriter,
                          triton::gpu::AddrSpace targets) const {
-  TritonLLVMOpBuilder(loc, rewriter).barrier(targets);
+  llvm::report_fatal_error("Barrier not supported in nano backend");
 }
 
 void TargetInfo::storeDShared(RewriterBase &, Location, Value,
@@ -58,27 +43,27 @@ Value TargetInfo::loadDShared(RewriterBase &, Location, Value,
 
 Value TargetInfo::shuffleXor(RewriterBase &rewriter, Location loc, Value val,
                              int i) const {
-  llvm_unreachable("shuffleXor not supported");
+  llvm_unreachable("shuffleXor not supported in nano backend");
 }
 
 Value TargetInfo::shuffleUp(RewriterBase &rewriter, Location loc, Value val,
                             int i) const {
-  llvm_unreachable("shuffleUp not supported");
+  llvm_unreachable("shuffleUp not supported in nano backend");
 }
 
 Value TargetInfo::shuffleIdx(RewriterBase &rewriter, Location loc, Value val,
                              int i) const {
-  llvm_unreachable("shuffleIdx not supported");
+  llvm_unreachable("shuffleIdx not supported in nano backend");
 }
 
 Value TargetInfo::shuffleIdx(RewriterBase &rewriter, Location loc, Value val,
                              Value i) const {
-  llvm_unreachable("shuffleIdx not supported");
+  llvm_unreachable("shuffleIdx not supported in nano backend");
 }
 
 Value TargetInfo::permute(RewriterBase &rewriter, Location loc, Value a,
                           Value b, Value selector) const {
-  llvm_unreachable("permute not supported");
+  llvm_unreachable("permute not supported in nano backend");
 }
 
 Value TargetInfo::programId(RewriterBase &rewriter, Location loc,
@@ -107,15 +92,13 @@ void TargetInfo::assertFail(RewriterBase &rewriter, Location loc, StringRef,
 int TargetInfo::getSharedAddressSpace() const { return 3; }
 
 int TargetInfo::getAddressSpace(Attribute addressSpace) const {
-  if (isa<triton::gpu::SharedMemorySpaceAttr>(addressSpace))
-    return 3;
-  llvm::report_fatal_error("Only SharedMemorySpace supported");
+  llvm::report_fatal_error("getAddressSpace not supported in nano backend");
 }
 
-bool TargetInfo::supportVectorizedAtomics() const { return true; }
+bool TargetInfo::supportVectorizedAtomics() const { return false; }
 
 bool TargetInfo::supportsMultiCTALaunch() const {
-  return getISAFamily() == ISAFamily::GFX1250;
+  return false;
 }
 
 } // namespace mlir::triton::NANO
