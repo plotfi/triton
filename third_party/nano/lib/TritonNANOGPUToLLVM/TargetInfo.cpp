@@ -45,23 +45,15 @@ void TargetInfo::barrier(Location loc, RewriterBase &rewriter,
   TritonLLVMOpBuilder(loc, rewriter).barrier(targets);
 }
 
-void TargetInfo::storeDShared(RewriterBase &rewriter, Location loc, Value ptr,
-                              std::optional<Value> ctaId, Value val,
-                              Value pred) const {
-  if (ctaId.has_value())
-    llvm::report_fatal_error("Cross-CTA shared memory not supported");
-  mlir::LLVM::NANO::llStore(rewriter, loc, ptr, val, pred);
+void TargetInfo::storeDShared(RewriterBase &, Location, Value,
+                              std::optional<Value>, Value, Value) const {
+  llvm::report_fatal_error("Shared memory not supported in nano backend");
 }
 
-Value TargetInfo::loadDShared(RewriterBase &rewriter, Location loc, Value ptr,
-                              std::optional<Value> ctaId, Type elemTy,
-                              Value pred, Operation *) const {
-  if (ctaId.has_value())
-    llvm::report_fatal_error("Cross-CTA shared memory not supported");
-  Value falseVal = LLVM::ConstantOp::create(rewriter, loc, elemTy,
-                                            rewriter.getZeroAttr(elemTy));
-  return mlir::LLVM::NANO::llLoad(rewriter, loc, ptr, elemTy, pred, falseVal,
-                                  {}, triton::CacheModifier::NONE, false);
+Value TargetInfo::loadDShared(RewriterBase &, Location, Value,
+                              std::optional<Value>, Type, Value,
+                              Operation *) const {
+  llvm::report_fatal_error("Shared memory not supported in nano backend");
 }
 
 Value TargetInfo::shuffleXor(RewriterBase &rewriter, Location loc, Value val,
