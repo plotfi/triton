@@ -384,7 +384,7 @@ static PyMethodDef ModuleMethods[] = {
 static struct PyModuleDef ModuleDef = {PyModuleDef_HEAD_INIT, "hip_utils", NULL,
                                        -1, ModuleMethods};
 
-PyMODINIT_FUNC PyInit_hip_utils(void) {
+PyMODINIT_FUNC PyInit_nano_utils(void) {
   if (!initSymbolTable())
     return NULL;
 

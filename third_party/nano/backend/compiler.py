@@ -228,7 +228,7 @@ class NanoBackend(BaseBackend):
 
         # Get metadata
         metadata["num_warps"] = total_warps_num
-        metadata["shared"] = src.get_int_attr("ttg.shared")
+        metadata["shared"] = src.get_int_attr("ttg.shared") or 0
         metadata["profile_scratch_size"] = src.get_int_attr("ttg.profile_scratch_memory_size") or 0
         metadata["profile_scratch_align"] = src.get_int_attr("ttg.profile_scratch_memory_alignment") or 1
 
