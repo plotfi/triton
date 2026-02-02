@@ -33,7 +33,7 @@ class NanoOptions:
     debug: bool = False
     sanitize_overflow: bool = True
     arch: str = None
-    supported_fp8_dtypes: Tuple[str] = ("fp8e4nv", "fp8e5", "fp8e5b16", "fp8e4b8")
+    supported_fp8_dtypes: Tuple[str] = ()
     deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()
     default_dot_input_precision: str = "ieee"
     allowed_dot_input_precisions: Tuple[str] = ("ieee",)
@@ -48,7 +48,7 @@ class NanoOptions:
     schedule_hint: str = 'none'
 
     def __post_init__(self):
-        gfx_major = int(self.arch[3:-2])  # Drop "gfx" prefix and minor/patch number
+        gfx_major = int(self.arch[3:-2])
         warp_size = 32 if gfx_major >= 10 else 64
         object.__setattr__(self, 'warp_size', warp_size)
         assert self.num_warps > 0 and (self.num_warps & (self.num_warps - 1)) == 0, \

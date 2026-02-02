@@ -15,7 +15,7 @@
  */
 
 /* Basic pointer types */
-typedef void *hipDeviceptr_t;
+typedef void *isaDeviceptr_t;
 typedef struct ihipStream_t *hipStream_t;
 typedef struct ihipModule_t *hipModule_t;
 typedef struct ihipModuleSymbol_t *hipFunction_t;
@@ -285,7 +285,7 @@ extern const char *isaLibSearchPaths[];
                   unsigned int sharedMemBytes, hipStream_t stream,             \
                   void **kernelParams, void **extra)                           \
   FOR_EACH_ERR_FN(hipPointerGetAttribute, void *data,                          \
-                  hipPointer_attribute attribute, hipDeviceptr_t ptr)
+                  hipPointer_attribute attribute, isaDeviceptr_t ptr)
 
 #define TRITON_HIP_MSG_BUFF_SIZE (1024U)
 
@@ -383,13 +383,13 @@ static inline void gpuAssert(hipError_t code, const char *file, int line) {
 static PyObject *data_ptr_str = NULL;
 
 static bool extractPointer(void *ptr, PyObject *obj) {
-  hipDeviceptr_t *dev_ptr = ptr;
+  isaDeviceptr_t *dev_ptr = ptr;
   if (obj == Py_None) {
-    *dev_ptr = (hipDeviceptr_t)0;
+    *dev_ptr = (isaDeviceptr_t)0;
     return true;
   }
   if (PyLong_Check(obj)) {
-    *dev_ptr = (hipDeviceptr_t)PyLong_AsUnsignedLongLong(obj);
+    *dev_ptr = (isaDeviceptr_t)PyLong_AsUnsignedLongLong(obj);
     return true;
   }
   PyObject *ret = PyObject_CallMethodNoArgs(obj, data_ptr_str);
@@ -398,7 +398,7 @@ static bool extractPointer(void *ptr, PyObject *obj) {
                     "Pointer argument must be uint64 or have data_ptr method");
     return false;
   }
-  *dev_ptr = (hipDeviceptr_t)PyLong_AsUnsignedLongLong(ret);
+  *dev_ptr = (isaDeviceptr_t)PyLong_AsUnsignedLongLong(ret);
   Py_DECREF(ret);
   if (*dev_ptr == 0)
     return true;
@@ -449,7 +449,7 @@ typedef enum {
 
 static Extractor extraction_map[EXTRACTOR_TYPE_COUNT] = {
     [EXTRACTOR_UNKNOWN] = {NULL, 0, {NULL}},
-    [EXTRACTOR_POINTER] = {extractPointer, sizeof(hipDeviceptr_t), {NULL}},
+    [EXTRACTOR_POINTER] = {extractPointer, sizeof(isaDeviceptr_t), {NULL}},
     [EXTRACTOR_INT32] = {extractI32, sizeof(int32_t), {"i1", "i32"}},
     [EXTRACTOR_UINT32] = {extractU32, sizeof(uint32_t), {"u1", "u32"}},
     [EXTRACTOR_FP32] = {extractFP32, sizeof(uint32_t), {"fp32", "f32"}},
