@@ -75,7 +75,7 @@ class NanoUtils(object):
     def __init__(self):
         libhip_path = _get_path_to_hip_runtime_dylib()
         src = Path(os.path.join(dirname, "driver.c")).read_text()
-        src = src.replace('/*py_libhip_search_path*/', libhip_path, 1)
+        src = src.replace('/*py_libisa_search_path*/', libhip_path, 1)
         mod = compile_module_from_src(src=src, name="nano_utils", include_dirs=include_dirs)
         self.load_binary = mod.load_binary
         self.get_device_properties = mod.get_device_properties
