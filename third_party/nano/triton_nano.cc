@@ -34,8 +34,6 @@
 #include <optional>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <pybind11/stl_bind.h>
-#include <sstream>
 #include <stdexcept>
 
 namespace py = pybind11;
@@ -147,10 +145,6 @@ void init_triton_nano(py::module &&m) {
       module->eraseNamedMetadata(openclVersion);
   });
 
-  m.def("disable_print_inline", [](llvm::Module *module) {
-    // Printf not supported in minimal nano backend - no ockl functions to modify
-  });
-
   m.def(
       "assemble_amdgcn",
       [](const std::string &assembly, const std::string &arch,
@@ -224,24 +218,6 @@ void init_triton_nano(py::module &&m) {
     std::unique_ptr<llvm::MCSubtargetInfo> sti(
         target->createMCSubtargetInfo(triple, arch, ""));
     return sti->checkFeatures("+architected-sgprs");
-  });
-
-  m.def("need_extern_lib", [](llvm::Module *module, const std::string &lib) {
-    for (llvm::Function &f : module->functions()) {
-      if (f.hasExternalLinkage() && f.hasName() && !f.hasExactDefinition()) {
-        llvm::StringRef funcName = f.getName();
-        if (funcName.contains(lib))
-          return true;
-        if (funcName.contains("__nv_")) {
-          std::stringstream message;
-          message << "Implicit conversion of CUDA " << funcName.str()
-                  << " device function has been dropped; "
-                  << "please use triton.language.extra.<op> instead";
-          throw std::runtime_error(message.str());
-        }
-      }
-    }
-    return false;
   });
 
   m.def("set_all_fn_arg_inreg", [](llvm::Function *fn) {

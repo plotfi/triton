@@ -5,18 +5,13 @@ from triton.backends.compiler import BaseBackend, GPUTarget, Language
 from triton._C.libtriton import ir, passes, llvm, nano
 from triton import knobs
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict
 from types import ModuleType
 import hashlib
 import tempfile
 import re
 import functools
 from .ISASupport import ISACompiler
-
-def get_min_dot_size(target: GPUTarget):
-    # We fallback to use FMA and cast arguments if certain configurations is
-    # not supported natively by matrix core units.
-    return lambda lhs_type, rhs_type: (1, 1, 1)
 
 
 @dataclass(frozen=True)
@@ -26,33 +21,18 @@ class NanoOptions:
     waves_per_eu: int = 0
     num_stages: int = 2
     num_ctas: int = 1
-    extern_libs: dict = None
     debug: bool = False
     sanitize_overflow: bool = True
     arch: str = None
-    supported_fp8_dtypes: Tuple[str] = ()
-    deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()
-    default_dot_input_precision: str = "ieee"
-    allowed_dot_input_precisions: Tuple[str] = ("ieee",)
     enable_fp_fusion: bool = True
-    launch_cooperative_grid: bool = False
-    matrix_instr_nonkdim: int = 0
-    kpack: int = 1
     allow_flush_denorm: bool = False
-    max_num_imprecise_acc_default: int = 0
     backend_name: str = 'nano'
-    instrumentation_mode: str = ""
-    schedule_hint: str = 'none'
 
     def __post_init__(self):
         warp_size = ISACompiler().get_warp_size(self.arch)
         object.__setattr__(self, 'warp_size', warp_size)
         assert self.num_warps > 0 and (self.num_warps & (self.num_warps - 1)) == 0, \
             "num_warps must be a power of 2"
-
-        # No external libraries needed for basic kernels
-        extern_libs = {} if self.extern_libs is None else dict(self.extern_libs)
-        object.__setattr__(self, 'extern_libs', tuple(extern_libs.items()))
 
     def hash(self):
         key = '_'.join([f'{name}-{val}' for name, val in self.__dict__.items()])
@@ -93,7 +73,7 @@ class NanoBackend(BaseBackend):
         )
 
     def get_codegen_implementation(self, options):
-        return {"min_dot_size": get_min_dot_size(self.target)}
+        return {}
 
     def get_module_map(self) -> Dict[str, ModuleType]:
         return {}
@@ -204,11 +184,6 @@ class NanoBackend(BaseBackend):
         isa_compiler.set_kernel_attributes(fns[0], options, total_warps_num)
         isa_compiler.set_all_fn_arg_inreg(fns[0], options.arch)
 
-        if options.extern_libs:
-            paths = [path for (name, path) in options.extern_libs if isa_compiler.need_extern_lib(llvm_mod, name)]
-            if len(paths) > 0:
-                llvm.link_extern_libs(llvm_mod, paths)
-
         llvm.optimize_module(llvm_mod, llvm.OPTIMIZE_O3, options.arch, '', [], options.enable_fp_fusion)
 
         if isa_compiler.has_architected_sgprs(options.arch):
@@ -217,11 +192,8 @@ class NanoBackend(BaseBackend):
         # Get metadata
         metadata["num_warps"] = total_warps_num
         metadata["shared"] = src.get_int_attr("ttg.shared") or 0
-        metadata["profile_scratch_size"] = src.get_int_attr("ttg.profile_scratch_memory_size") or 0
-        metadata["profile_scratch_align"] = src.get_int_attr("ttg.profile_scratch_memory_alignment") or 1
 
         isa_compiler.cleanup_module_metadata(llvm_mod)
-        isa_compiler.disable_print_inline(llvm_mod)
         return str(llvm_mod)
 
     @staticmethod

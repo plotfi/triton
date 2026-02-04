@@ -121,14 +121,8 @@ class ISACompiler:
         fn.remove_fn_attr("amdgpu-no-workgroup-id-y")
         fn.remove_fn_attr("amdgpu-no-workgroup-id-z")
 
-    def need_extern_lib(self, llvm_mod, lib_name: str) -> bool:
-        return nano.need_extern_lib(llvm_mod, lib_name)
-
     def cleanup_module_metadata(self, llvm_mod) -> None:
         nano.cleanup_bitcode_metadata(llvm_mod)
-
-    def disable_print_inline(self, llvm_mod) -> None:
-        nano.disable_print_inline(llvm_mod)
 
     def get_real_true16_feature(self, arch: str) -> str:
         return '-real-true16' if 'gfx11' in arch else ''
