@@ -90,12 +90,9 @@ class NanoBackend(BaseBackend):
         passes.ttir.add_rewrite_tensor_pointer(pm)
         passes.ttir.add_rewrite_tensor_descriptor_to_pointer(pm)
         passes.common.add_canonicalizer(pm)
-        passes.ttir.add_combine(pm)
-        passes.ttir.add_reorder_broadcast(pm)
-        passes.common.add_cse(pm)
-        passes.ttir.add_triton_licm(pm)
-        passes.common.add_symbol_dce(pm)
-        passes.ttir.add_loop_unroll(pm)
+
+        # Add more passes here:
+
         pm.run(mod, 'make_ttir')
         return mod
 
@@ -113,21 +110,10 @@ class NanoBackend(BaseBackend):
         pm.enable_debug()
         passes.ttgpuir.add_coalesce(pm)
         passes.ttgpuir.add_remove_layout_conversions(pm)
-        passes.ttgpuir.add_optimize_thread_locality(pm)
-        passes.ttgpuir.add_remove_layout_conversions(pm)
 
-        passes.ttgpuir.add_fuse_nested_loops(pm)
-        passes.common.add_canonicalizer(pm)
-        passes.ttir.add_triton_licm(pm)
-        passes.common.add_canonicalizer(pm)
-        passes.common.add_canonicalizer(pm)
-
-        passes.ttgpuir.add_remove_layout_conversions(pm)
-        passes.ttgpuir.add_reduce_data_duplication(pm)
+        # Add more passes here:
 
         passes.common.add_canonicalizer(pm)
-        passes.common.add_cse(pm)
-        passes.common.add_symbol_dce(pm)
         pm.run(mod, 'make_ttgir')
         return mod
 
@@ -139,21 +125,16 @@ class NanoBackend(BaseBackend):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
         passes.convert.add_scf_to_cf(pm)
-        passes.gluon.add_inliner(pm)
         passes.convert.add_index_to_llvmir(pm)
 
+        # If adding SMEM, uncomment:
         # nano.passes.ttgpuir.add_allocate_shared_memory(pm)
 
         __NANO_FTZ = True
         nano.passes.ttgpuir.add_to_llvmir(pm, options.arch, __NANO_FTZ)
         passes.common.add_canonicalizer(pm)
-        passes.common.add_cse(pm)
 
-        passes.convert.add_cf_to_llvmir(pm)
-        passes.convert.add_arith_to_llvmir(pm)
-        passes.common.add_canonicalizer(pm)
-        passes.common.add_cse(pm)
-        passes.common.add_symbol_dce(pm)
+        # Add more passes here:
 
         if not knobs.compilation.disable_line_info:
             passes.llvmir.add_di_scope(pm)
