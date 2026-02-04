@@ -7,14 +7,11 @@ from triton import knobs
 from dataclasses import dataclass
 from typing import Any, Dict, Tuple
 from types import ModuleType
-import os
 import hashlib
 import tempfile
 import re
 import functools
-import warnings
-from pathlib import Path
-
+from .isa_support import ISACompiler
 
 def get_min_dot_size(target: GPUTarget):
     # We fallback to use FMA and cast arguments if certain configurations is
@@ -48,8 +45,7 @@ class NanoOptions:
     schedule_hint: str = 'none'
 
     def __post_init__(self):
-        gfx_major = int(self.arch[3:-2])
-        warp_size = 32 if gfx_major >= 10 else 64
+        warp_size = ISACompiler().get_warp_size(self.arch)
         object.__setattr__(self, 'warp_size', warp_size)
         assert self.num_warps > 0 and (self.num_warps & (self.num_warps - 1)) == 0, \
             "num_warps must be a power of 2"
@@ -75,7 +71,8 @@ class NanoBackend(BaseBackend):
     def __init__(self, target: GPUTarget) -> None:
         super().__init__(target)
         assert isinstance(target.arch, str)
-        self.binary_ext = "hsaco"
+        self.isa_compiler = ISACompiler()
+        self.binary_ext = self.isa_compiler.get_binary_extension()
 
     def get_target_name(self, options) -> str:
         return f"nano:{options.arch}"
@@ -157,6 +154,7 @@ class NanoBackend(BaseBackend):
     @staticmethod
     def make_llir(src, metadata, options):
         """Convert Triton GPU IR to LLVM IR."""
+        isa_compiler = ISACompiler()
         mod = src
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
@@ -186,45 +184,35 @@ class NanoBackend(BaseBackend):
         llvm.init_targets()
         context = llvm.context()
         llvm_mod = llvm.to_module(mod, context)
-        nano.attach_target_triple(llvm_mod)
-        target_features = ''
-        llvm.attach_datalayout(llvm_mod, nano.TARGET_TRIPLE, options.arch, target_features)
+        isa_compiler.attach_target_triple(llvm_mod)
+        isa_compiler.attach_datalayout(llvm_mod, options.arch)
 
         # Set various control constants
-        nano.set_isa_version(llvm_mod, options.arch)
-        nano.set_abi_version(llvm_mod, 500)
-        nano.set_bool_control_constant(llvm_mod, "__oclc_finite_only_opt", False)
-        nano.set_bool_control_constant(llvm_mod, "__oclc_correctly_rounded_sqrt32", True)
-        nano.set_bool_control_constant(llvm_mod, "__oclc_unsafe_math_opt", False)
-        nano.set_bool_control_constant(llvm_mod, "__oclc_wavefrontsize64", options.warp_size == 64)
+        isa_compiler.set_isa_version(llvm_mod, options.arch)
+        isa_compiler.set_abi_version(llvm_mod, 500)
+        isa_compiler.set_bool_control_constant(llvm_mod, "__oclc_finite_only_opt", False)
+        isa_compiler.set_bool_control_constant(llvm_mod, "__oclc_correctly_rounded_sqrt32", True)
+        isa_compiler.set_bool_control_constant(llvm_mod, "__oclc_unsafe_math_opt", False)
+        isa_compiler.set_wavefront_size(llvm_mod, options.warp_size)
 
         # Set kernel attributes
         fns = [fn for fn in llvm_mod.get_functions() if not fn.is_declaration()]
-        fns[0].set_calling_conv(nano.CALLING_CONV_AMDGPU_KERNEL)
         total_warps_num = options.num_warps
         total_num_warps = src.get_int_attr("ttg.total-num-warps")
         if total_num_warps is not None:
             total_warps_num = total_num_warps
-        fns[0].add_fn_attr("amdgpu-flat-work-group-size", f"1,{total_warps_num*options.warp_size}")
-        fns[0].add_fn_attr("uniform-work-group-size", "true")
-        fns[0].add_fn_attr("amdgpu-waves-per-eu", f"{options.waves_per_eu}, {options.waves_per_eu}")
-        denormal_mode = "preserve-sign" if options.allow_flush_denorm else "ieee"
-        fns[0].add_fn_attr("denormal-fp-math-f32", denormal_mode)
-
-        if options.arch != "gfx1250":
-            nano.set_all_fn_arg_inreg(fns[0])
+        isa_compiler.set_kernel_attributes(fns[0], options, total_warps_num)
+        isa_compiler.set_all_fn_arg_inreg(fns[0], options.arch)
 
         if options.extern_libs:
-            paths = [path for (name, path) in options.extern_libs if nano.need_extern_lib(llvm_mod, name)]
+            paths = [path for (name, path) in options.extern_libs if isa_compiler.need_extern_lib(llvm_mod, name)]
             if len(paths) > 0:
                 llvm.link_extern_libs(llvm_mod, paths)
 
         llvm.optimize_module(llvm_mod, llvm.OPTIMIZE_O3, options.arch, '', [], options.enable_fp_fusion)
 
-        if nano.has_architected_sgprs(options.arch):
-            fns[0].remove_fn_attr("amdgpu-no-workgroup-id-x")
-            fns[0].remove_fn_attr("amdgpu-no-workgroup-id-y")
-            fns[0].remove_fn_attr("amdgpu-no-workgroup-id-z")
+        if isa_compiler.has_architected_sgprs(options.arch):
+            isa_compiler.remove_workgroup_id_attrs(fns[0])
 
         # Get metadata
         metadata["num_warps"] = total_warps_num
@@ -232,33 +220,34 @@ class NanoBackend(BaseBackend):
         metadata["profile_scratch_size"] = src.get_int_attr("ttg.profile_scratch_memory_size") or 0
         metadata["profile_scratch_align"] = src.get_int_attr("ttg.profile_scratch_memory_alignment") or 1
 
-        nano.cleanup_bitcode_metadata(llvm_mod)
-        nano.disable_print_inline(llvm_mod)
+        isa_compiler.cleanup_module_metadata(llvm_mod)
+        isa_compiler.disable_print_inline(llvm_mod)
         return str(llvm_mod)
 
     @staticmethod
     def make_amdgcn(src, metadata, options):
         """Convert LLVM IR to AMDGCN assembly."""
+        isa_compiler = ISACompiler()
         names = re.findall(r"define amdgpu_kernel void @([a-zA-Z_][a-zA-Z0-9_]*)", src)
         assert len(names) == 1
         metadata["name"] = names[0]
 
         flags = []
-        features = '-real-true16' if 'gfx11' in options.arch else ''
-        amdgcn = llvm.translate_to_asm(src, nano.TARGET_TRIPLE, options.arch, features, flags,
-                                       options.enable_fp_fusion, False)
+        features = isa_compiler.get_real_true16_feature(options.arch)
+        amdgcn = isa_compiler.translate_to_asm(src, options.arch, features, flags,
+                                               options.enable_fp_fusion)
         return amdgcn
 
     @staticmethod
     def make_hsaco(src, metadata, options):
         """Assemble AMDGCN to HSACO binary."""
-        target_features = ''
-        hsaco = nano.assemble_amdgcn(src, options.arch, target_features)
+        isa_compiler = ISACompiler()
+        hsaco = isa_compiler.assemble_isa(src, options.arch)
         with tempfile.NamedTemporaryFile() as tmp_out:
             with tempfile.NamedTemporaryFile() as tmp_in:
                 with open(tmp_in.name, "wb") as fd_in:
                     fd_in.write(hsaco)
-                nano.link_hsaco(tmp_in.name, tmp_out.name)
+                isa_compiler.link_binary(tmp_in.name, tmp_out.name)
             with open(tmp_out.name, "rb") as fd_out:
                 ret = fd_out.read()
         return ret
