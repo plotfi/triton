@@ -11,7 +11,7 @@ import hashlib
 import tempfile
 import re
 import functools
-from .isa_support import ISACompiler
+from .ISASupport import ISACompiler
 
 def get_min_dot_size(target: GPUTarget):
     # We fallback to use FMA and cast arguments if certain configurations is

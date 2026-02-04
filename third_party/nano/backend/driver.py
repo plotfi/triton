@@ -7,7 +7,7 @@ from triton.backends.compiler import GPUTarget
 from triton.backends.driver import GPUDriver
 from triton.runtime.build import compile_module_from_src
 from triton import knobs
-from .isa_support import get_path_to_isa_runtime_dylib, is_isa_backend_active
+from .ISASupport import get_path_to_isa_runtime_dylib, is_isa_backend_active
 
 dirname = os.path.dirname(os.path.realpath(__file__))
 include_dirs = [os.path.join(dirname, "include")]
